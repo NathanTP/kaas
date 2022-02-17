@@ -1,0 +1,9 @@
+*.so
+*.cubin
+*.ptx
+*.tar
+*.o
+*.png
+__pycache__
+*.egg-info*
+.ropeproject
