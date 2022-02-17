@@ -1,15 +1,17 @@
 import os
 import ctypes as ct
-from numpy import ctypeslib
+
 
 # define complex ctype as a python class
 class complex(ct.Structure):
     _fields_ = [('real', ct.c_float), ('imag', ct.c_float)]
 
+
 c_complex_p = ct.POINTER(complex)
 
 
 dir_path = os.path.dirname(os.path.realpath(__file__))
+
 
 class kernelConfig(ct.Structure):
     """This mirrors the CudaConfig struct defined in cutlassAdapters.h"""
@@ -22,6 +24,7 @@ class kernelConfig(ct.Structure):
         ("blockZ", ct.c_int),
         ("smem_size", ct.c_int)
     ]
+
 
 def loadAdapter():
     libc = ct.cdll.LoadLibrary(str(dir_path) + "/complexCutlass/cutlassAdapters.so")
@@ -40,8 +43,6 @@ def loadAdapter():
     return getArg
 
 
-
-
 def parseSgemmArgs(literalVals, dAddrs, cutlassAdapter):
     M = literalVals[2]
     N = literalVals[3]
@@ -56,8 +57,8 @@ def parseSgemmArgs(literalVals, dAddrs, cutlassAdapter):
     c_d = dAddrs[2]
     thing = ct.cast(int(a_d), c_complex_p)
     params = cutlassAdapter(M, N, K, alpha,
-                    thing, lda,
-                    ct.cast(int(b_d), c_complex_p), ldb,
-                    beta,
-                    ct.cast(int(c_d), c_complex_p), ldc)
+                            thing, lda,
+                            ct.cast(int(b_d), c_complex_p), ldb,
+                            beta,
+                            ct.cast(int(c_d), c_complex_p), ldc)
     return params

@@ -77,4 +77,4 @@ def invoke(rawReq, stats=None):
 def kaasServeRayTask(req):
     """Handle a single KaaS request as a ray task. See kaasServeRay for
     details."""
-    return kaasServeRay(req)
+    return invoke(req)

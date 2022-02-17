@@ -221,7 +221,7 @@ class kaasReq():
 
     def toDict(self):
         return {"kernels": [k.toDict() for k in self.kernels],
-                "nIter" : self.nIter}
+                "nIter": self.nIter}
 
 
 denseBuf = collections.namedtuple("denseBuf",

@@ -487,9 +487,6 @@ def kaasServeInternal(req, ctx):
             specArgs = kSpec[7]
             ioTypes = kSpec[8]
 
-
-
-
             arguments = []
             for argName, ioType in zip(specArgs, ioTypes):
                 arg = req.bufferMap[argName]
@@ -503,8 +500,6 @@ def kaasServeInternal(req, ctx):
                     visibleOutputs.add(argBuf.key)
 
                 arguments.append(argBuf)
-
-
 
             kern.Invoke(kSpec[6], arguments, kSpec[3], kSpec[4], kSpec[5])
 
