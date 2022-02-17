@@ -11,7 +11,7 @@ with open("requirements.txt", "r") as f:
 if shutil.which('nvcc') is not None:
     install_requires.append('pycuda')
 
-with open("README.md", "r") as fh:
+with open("../README.md", "r") as fh:
     long_description = fh.read()
 
 #XXX

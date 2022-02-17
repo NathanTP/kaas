@@ -2,58 +2,95 @@ import collections.abc
 import time
 from contextlib import contextmanager
 import jsonpickle as json
+import numpy as np
+import contextlib
+import ctypes
 
 
 class prof():
-    def __init__(self, fromDict=None):
+    def __init__(self, fromDict=None, detail=False):
         """A profiler object for a metric or event type. The counter can be
         updated multiple times per event, while calling increment() moves on to
-        a new event."""
+        a new event. If detail==true, all events are logged allowing more
+        complex statistics. This may affect performance if there are many
+        events."""
+        self.detail = detail
         if fromDict is not None:
+            if self.detail:
+                self.events = fromDict['events']
             self.total = fromDict['total']
             self.nevent = fromDict['nevent']
         else:
             self.total = 0.0
             self.nevent = 0
 
+            if self.detail:
+                self.currentEvent = 0.0
+                self.events = []
+
     def update(self, n):
         """Update increases the value of this entry for the current event."""
         self.total += n
+        if self.detail:
+            self.currentEvent += n
 
     def increment(self, n=0):
         """Finalize the current event (increment the event counter). If n is
         provided, the current event will be updated by n before finalizing."""
         self.update(n)
         self.nevent += 1
+        if self.detail:
+            self.events.append(self.currentEvent)
+            self.currentEvent = 0.0
 
-    def total(self):
-        """Report the total value of the counter for all events"""
-        return self.total
+    def report(self, includeEvents=False):
+        """Create a report dictionary from this profile. If the profile was
+        created with detail=True, full summary statistics are included.
+        Otherwise only the mean is reported. If includeEvents=True, the full
+        trace of all events will also be included."""
+        if self.nevent == 0:
+            raise RuntimeError("Metric has no events")
 
-    def mean(self):
-        """Report the average value per event"""
-        return self.total / self.nevent
+        rep = {}
+        rep['total'] = self.total
+
+        rep['mean'] = self.total / self.nevent
+        if self.detail:
+            events = np.array(self.events)
+            rep['min'] = events.min()
+            rep['max'] = events.max()
+            rep['std'] = np.std(events)
+            rep['p50'] = np.quantile(events, 0.50)
+            rep['p90'] = np.quantile(events, 0.90)
+            rep['p99'] = np.quantile(events, 0.99)
+            if includeEvents:
+                rep['events'] = self.events
+
+        return rep
 
 
 class profCollection(collections.abc.MutableMapping):
-    """This is basically a dictionary. It has a few nice additional features
-    though. In particular, it will generate an empty prof whenever a
-    non-existant key is accessed."""
+    """This is basically a dictionary and can be used anywhere a dictionary of
+    profs was previously used. It has a few nice additional features though. In
+    particular, it will generate an empty prof whenever a non-existant key is
+    accessed."""
 
-    def __init__(self):
+    def __init__(self, detail=False):
         # a map of modules included in these stats. Each module is a
         # profCollection. Submodules can nest indefinitely.
+        self.detail = detail
+
         self.mods = {}
 
         self.profs = dict()
 
-    def __getitem__(self, key):
-        if key not in self.profs:
-            self.profs[key] = prof()
-        return self.profs[key]
-
     def __contains__(self, key):
         return key in self.profs
+
+    def __getitem__(self, key):
+        if key not in self.profs:
+            self.profs[key] = prof(detail=self.detail)
+        return self.profs[key]
 
     def __setitem__(self, key, value):
         self.profs[key] = value
@@ -72,7 +109,7 @@ class profCollection(collections.abc.MutableMapping):
 
     def mod(self, name):
         if name not in self.mods:
-            self.mods[name] = profCollection()
+            self.mods[name] = profCollection(detail=self.detail)
 
         return self.mods[name]
 
@@ -89,14 +126,24 @@ class profCollection(collections.abc.MutableMapping):
         for name, mod in new.mods.items():
             # Merging into an empty profCollection causes a deep copy
             if name not in self.mods:
-                self.mods[name] = profCollection()
+                self.mods[name] = profCollection(detail=self.detail)
             self.mods[name].merge(mod)
 
-    def report(self):
-        flattened = {name: v.mean() for name, v in self.profs.items()}
+    def report(self, includeEvents=False):
+        """Create a report dctionary from this collection of the form
+        {metricName: metricReport} where metricReport is returned by
+        prof.report(). See prof.report() for details of the contents of each
+        metricReport, including the behavior of includeEvents."""
+
+        flattened = {}
+        for name, v in self.profs.items():
+            try:
+                flattened[name] = v.report(includeEvents=includeEvents)
+            except Exception as e:
+                raise RuntimeError(f"Failed to report metric '{name}'") from e
 
         for name, mod in self.mods.items():
-            flattened = {**flattened, **{name+":"+itemName: v for itemName, v in mod.report().items()}}
+            flattened = {**flattened, **{name+":"+itemName: v for itemName, v in mod.report(includeEvents=includeEvents).items()}}
 
         return flattened
 
@@ -138,3 +185,36 @@ def reportTimers(times):
 
 def printTimers(times):
     print(json.dumps(reportTimers(times), indent=4))
+
+
+def cudaProfilerResetCtx():
+    # nvprof can't handle changes in context once profiling has been enabled.
+    # If you change contexts (i.e. creating one during initialization), you
+    # should call this.
+    if profilerStarted:
+        cudaRT.cudaProfilerStart()
+
+
+def cudaProfilerStart():
+    global cudaRT
+    global profilerStarted
+
+    if cudaRT is None:
+        cudaRT = ctypes.CDLL('libcudart.so')
+    profilerStarted = True
+    cudaRT.cudaProfilerStart()
+
+
+def cudaProfilerStop():
+    global profilerStarted
+    cudaRT.cudaProfilerStop()
+    profilerStarted = False
+
+
+@contextlib.contextmanager
+def cudaProfile(enable=True):
+    if enable:
+        cudaProfilerStart()
+    yield
+    if enable:
+        cudaProfilerStop()
