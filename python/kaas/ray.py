@@ -42,7 +42,7 @@ def init():
 reqCache = {}
 
 
-def invoke(rawReq, stats=None):
+def invoke(rawReq, stats=None, clientID=None):
     """Handle a single KaaS request in the current thread/actor/task. GPU state
     is cached and no attempt is made to be polite in sharing the GPU. The user
     should ensure that the only GPU-enabled functions running are
@@ -64,7 +64,7 @@ def invoke(rawReq, stats=None):
 
             req.reKey(renameMap)
 
-        visibleOutputs = _server.kaasServeInternal(req, kv, stats)
+        visibleOutputs = _server.kaasServeInternal(req, kv, stats, clientID=clientID)
 
     returns = []
     for outKey in visibleOutputs:

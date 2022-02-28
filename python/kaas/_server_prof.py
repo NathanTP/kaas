@@ -425,7 +425,7 @@ class bufferCache():
         self.makeRoom(total)
         updateTimer('t_devDEvict', pstart, final=False)
 
-    def load(self, bSpec, overwrite=False):
+    def load(self, bSpec, overwrite=False, clientID=None):
         """Load a buffer onto the device, fetching from the KV store if
         necessary. If overwrite=True, a new buffer will be created. If the
         buffer is already in the cache and dirty, it will be written back and
@@ -436,6 +436,9 @@ class bufferCache():
         size = bSpec[1]
         key = bSpec[2]
         ephemeral = bSpec[3]
+
+        if ephemeral:
+            key = f"{clientID}:{key}"
 
         buf = self.bufs.get(key, None)
         if buf is not None:
@@ -536,7 +539,7 @@ def initServer():
         bCache = bufferCache()
 
 
-def kaasServeInternal(req, kv, newProfs=None):
+def kaasServeInternal(req, kv, newProfs=None, clientID=None):
     """Internal implementation of kaas execution. Req is a kaas.kaasReq, not a
     dictionary"""
 
@@ -579,9 +582,9 @@ def kaasServeInternal(req, kv, newProfs=None):
                 arg = req.bufferMap[argName]
                 pstart = startTimer()
                 if ioType == 'o':
-                    argBuf = bCache.load(arg, overwrite=True)
+                    argBuf = bCache.load(arg, overwrite=True, clientID=clientID)
                 else:
-                    argBuf = bCache.load(arg)
+                    argBuf = bCache.load(arg, clientID=clientID)
                 updateTimer('t_setupArgs', pstart, final=False)
 
                 if (ioType == 'o' or ioType == 'io') and not argBuf.ephemeral:

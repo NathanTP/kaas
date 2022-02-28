@@ -187,6 +187,9 @@ def printTimers(times):
     print(json.dumps(reportTimers(times), indent=4))
 
 
+profilerStarted = False
+
+
 def cudaProfilerResetCtx():
     # nvprof can't handle changes in context once profiling has been enabled.
     # If you change contexts (i.e. creating one during initialization), you
