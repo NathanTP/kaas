@@ -193,36 +193,36 @@ class kernelSpec():
         return self.name == other.name
 
 
-class kaasReq():
-    @classmethod
-    def fromDict(cls, d):
-        kernels = [kernelSpec.fromDict(ks) for ks in d['kernels']]
-        if 'nIter' in d:
-            nIter = d['nIter']
-        else:
-            nIter = 1
-        return cls(kernels, nIter=nIter)
-
-    def __init__(self, kernels, nIter=1):
-        """Turn a list of kernelSpecs into a kaas Request"""
-        self.kernels = kernels
-        self.nIter = nIter
-
-    def reKey(self, keyMap):
-        """Renames kv keys for non-ephemeral buffers based on a keyMap.
-        Internal names remain the same and epehemeral buffers are not affected.
-        keyMap: {internalName -> newKey}
-        """
-        for kern in self.kernels:
-            for buf in kern.arguments:
-                if not buf.ephemeral:
-                    if buf.name in keyMap:
-                        buf.key = keyMap[buf.name]
-
-    def toDict(self):
-        return {"kernels": [k.toDict() for k in self.kernels],
-                "nIter": self.nIter}
-
+# class kaasReq():
+#     @classmethod
+#     def fromDict(cls, d):
+#         kernels = [kernelSpec.fromDict(ks) for ks in d['kernels']]
+#         if 'nIter' in d:
+#             nIter = d['nIter']
+#         else:
+#             nIter = 1
+#         return cls(kernels, nIter=nIter)
+#
+#     def __init__(self, kernels, nIter=1):
+#         """Turn a list of kernelSpecs into a kaas Request"""
+#         self.kernels = kernels
+#         self.nIter = nIter
+#
+#     def reKey(self, keyMap):
+#         """Renames kv keys for non-ephemeral buffers based on a keyMap.
+#         Internal names remain the same and epehemeral buffers are not affected.
+#         keyMap: {internalName -> newKey}
+#         """
+#         for kern in self.kernels:
+#             for buf in kern.arguments:
+#                 if not buf.ephemeral:
+#                     if buf.name in keyMap:
+#                         buf.key = keyMap[buf.name]
+#
+#     def toDict(self):
+#         return {"kernels": [k.toDict() for k in self.kernels],
+#                 "nIter": self.nIter}
+#
 
 denseBuf = collections.namedtuple("denseBuf",
                                   ['name', 'size', 'key', 'ephemeral', 'const'])
@@ -234,9 +234,11 @@ denseKern = collections.namedtuple("denseKern",
                                     'sharedSize', 'literals', 'arguments'])
 
 
-class kaasReqDense():
-    """A high performance version of kaasReq that is fast to serialize and
-    modify, though it's less pleasant to work with. We use tuples for everything:
+class kaasReq():
+    """A single kaas invocation request. It is essentially a collection of
+    kernelSpecs (in order of invocation) and their associated bufferSpecs. It
+    is designed to be fast to serialize and modify, though it's less pleasant
+    to work with. We use tuples for everything:
         - buffers:  (0 name, 1 size, 2 key, 3 ephemeral?, 4 const?)
         - kernels:  (0 name, 1 libraryPath, 2 kernelFunc,
                      3 gridDim, 4 blockDim, 5 sharedSize,

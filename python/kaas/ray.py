@@ -5,7 +5,7 @@ from . import profiling
 import ray
 
 
-class rayKV():
+class _rayKV():
     """A libff.kv compatible(ish) KV store for Ray plasma store. Unlike normal
     KV stores, plasma does not allow arbitrary key names which is incompatible
     with libff.kv. Instead, we add a new 'flush' method that returns handles
@@ -36,6 +36,19 @@ def init():
     _server.initServer()
 
 
+def putObj(obj):
+    """KaaS uses the ray object store behind the scenes for bufferSpec inputs,
+    but it has to handle it carefully. You should use this function to write
+    objects intended for kaas bufferSpecs. You can also pass a ray reference to
+    be wrapped appropriately."""
+    if isinstance(obj, ray._raylet.ObjectRef):
+        ref = obj
+    else:
+        ref = ray.put(obj)
+
+    return ray.cloudpickle.dumps(ref)
+
+
 # Request serialization/deserialization is a pretty significant chunk of time,
 # but they only change in very minor ways each time so we cache the
 # deserialization here.
@@ -47,12 +60,17 @@ def invoke(rawReq, stats=None, clientID=None):
     is cached and no attempt is made to be polite in sharing the GPU. The user
     should ensure that the only GPU-enabled functions running are
     kaasServeRay(). Returns a list of handles of outputs (in the same order as
-    the request)"""
-    kv = rayKV()
-    with profiling.timer('t_e2e', stats):
-        with profiling.timer("t_load_request", stats):
-            rawReq = ray.get(rawReq[0])
+    the request).
 
+    rawReq: (kaasReqDense reference, rename map)
+        The first argument is a reference to a kaasReqDense, this may be cached
+        by the kaas server. The second argument is a rename map
+        {bufferName -> newRef} that reassigns keys (ray references) to names in
+        the requests buffer list.  This helps avoid extra
+        serialization/deserialization (which is expensive for kaasReq in some
+        cases)."""
+    kv = _rayKV()
+    with profiling.timer('t_e2e', stats):
         reqRef = rawReq[0]
         renameMap = rawReq[1]
         with profiling.timer("t_parse_request", stats):
@@ -74,7 +92,9 @@ def invoke(rawReq, stats=None, clientID=None):
 
 
 @ray.remote(num_gpus=1)
-def kaasServeRayTask(req):
-    """Handle a single KaaS request as a ray task. See kaasServeRay for
-    details."""
+def invokerTask(req):
+    """Handle a single KaaS request as a ray task. This isn't the recommended
+    way to use kaas (it is intended for persistent allocations like actors),
+    but it can be useful from time to time."""
+    init()
     return invoke(req)

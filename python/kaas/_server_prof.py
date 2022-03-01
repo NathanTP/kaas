@@ -13,8 +13,8 @@ from . import cutlass
 
 from . import complexCutlass
 
-# logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.DEBUG)
-logging.basicConfig(format="%(levelname)s: %(message)s", level=logging.INFO)
+logLevel = logging.INFO
+logging.basicConfig(format="%(levelname)s: %(message)s", level=logLevel)
 
 # Profiling level sets how aggressive we are in profiling.
 #   - 0 no profiling
@@ -546,6 +546,13 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
     global profs
     profs = newProfs
 
+    # If the user doesn't pass us anything for profiling, we should just avoid
+    # it completely. This is actually needed for correctness (can't collect
+    # stats into None).
+    if newProfs is None:
+        global profLevel
+        profLevel = 0
+
     # This gets reset every call because libff only gives us the kv handle per
     # call and it could (in theory) change in some way between calls.
     bCache.setKV(kv)
@@ -571,7 +578,7 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
 
     for i in range(req.nIter):
         for kSpec in req.kernels:
-            profs['n_invoke'].update(1)
+            updateProf('n_invoke', 1)
             kern = kCache.get(kSpec)
 
             specArgs = kSpec[7]
