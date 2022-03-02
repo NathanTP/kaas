@@ -92,9 +92,62 @@ def invoke(rawReq, stats=None, clientID=None):
 
 
 @ray.remote(num_gpus=1)
+class invokerActor():
+    def __init__(self):
+        """invokerActor is the ray version of a kaas worker, it is assigned a
+        single GPU and supports requests from multiple clients."""
+        init()
+
+        # {clientID -> profiling.profCollection}
+        self.stats = {}
+
+    def ensureReady(self):
+        """A dummy call that will only return once ray has fully initialized
+        this actor. Used to ensure warm starts for subsequent calls."""
+        pass
+
+    def invoke(self, req, clientID=None):
+        """Invoke the kaasReq req on this actor. You may optionally pass a
+        clientID. clientIDs are used for per-client profiling and may affect
+        scheduling/caching policies."""
+        if clientID not in self.stats:
+            self.stats[clientID] = profiling.profCollection()
+
+        with profiling.timer('t_e2e', self.stats[clientID]):
+            res = invoke(req, self.stats[clientID])
+
+        # Our actor invoke() should return all outputs directly (multiple return values).
+        # The internal invoke() returns a list of output references. We want
+        # the caller of actor.invoke to get references to the outputs directly.
+        # For num_returns >= 2, returning a list here gives the caller the
+        # output references directly. For num_returns=1, ray doesn't unpack the
+        # list, it returns a reference to a list that we have to later unstrip.
+        # We work around that here so that the caller always gets one or more
+        # references to the actual outputs as direct returns.
+        if len(res) == 1:
+            return res[0]
+        else:
+            return res
+
+
+@ray.remote(num_gpus=1)
 def invokerTask(req):
     """Handle a single KaaS request as a ray task. This isn't the recommended
     way to use kaas (it is intended for persistent allocations like actors),
     but it can be useful from time to time."""
     init()
-    return invoke(req)
+
+    res = invoke(req)
+
+    # Our actor invoke() should return all outputs directly (multiple return values).
+    # The internal invoke() returns a list of output references. We want
+    # the caller of actor.invoke to get references to the outputs directly.
+    # For num_returns >= 2, returning a list here gives the caller the
+    # output references directly. For num_returns=1, ray doesn't unpack the
+    # list, it returns a reference to a list that we have to later unstrip.
+    # We work around that here so that the caller always gets one or more
+    # references to the actual outputs as direct returns.
+    if len(res) == 1:
+        return res[0]
+    else:
+        return res

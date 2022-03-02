@@ -542,7 +542,7 @@ class PolicyBalance(Policy):
             newActor = self.runnerClass.remote()
 
             # Ensure actor is fully booted and ready
-            ray.wait([newActor.ensureWarm.remote()], fetch_local=False)
+            ray.wait([newActor.ensureReady.remote()], fetch_local=False)
 
             newStatus = actorStatus()
             newStatus.state = actorStatus.PENDING
