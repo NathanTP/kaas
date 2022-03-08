@@ -27,6 +27,7 @@ class bufferSpec():
     def fromDict(cls, d):
         return cls(d['name'],
                    d['size'],
+                   offset=d.get('offset', 0),
                    key=d.get('key', None),
                    ephemeral=d.get('ephemeral', False),
                    const=d.get('const', False))
@@ -197,7 +198,7 @@ class kernelSpec():
 
 
 denseBuf = collections.namedtuple("denseBuf",
-                                  ['name', 'size', 'key', 'ephemeral', 'const'])
+                                  ['name', 'size', 'offset', 'key', 'ephemeral', 'const'])
 
 denseLiteral = collections.namedtuple("denseLiteral", ['dtype', 'val'])
 
@@ -230,8 +231,8 @@ class kaasReq():
             arguments = []
             for buf in kern.arguments:
                 if buf.name not in self.bufferMap:
-                    self.bufferMap[buf.name] = denseBuf(buf.name, buf.size, buf.key,
-                                                        buf.ephemeral, buf.const)
+                    self.bufferMap[buf.name] = denseBuf(buf.name, buf.size, buf.offset,
+                                                        buf.key, buf.ephemeral, buf.const)
                 arguments.append(buf.name)
 
             literals = [denseLiteral(literal.t, literal.val) for literal in kern.literals]
@@ -244,6 +245,5 @@ class kaasReq():
     def reKey(self, keyMap):
         for name, newKey in keyMap.items():
             oldBuf = self.bufferMap[name]
-            # self.bufferMap[name] = denseBuf(oldBuf[0], oldBuf[1], newKey, oldBuf[3], oldBuf[4])
-            self.bufferMap[name] = denseBuf(oldBuf.name, oldBuf.size, newKey,
-                                            oldBuf.ephemeral, oldBuf.const)
+            self.bufferMap[name] = denseBuf(oldBuf.name, oldBuf.size, oldBuf.offset,
+                                            newKey, oldBuf.ephemeral, oldBuf.const)

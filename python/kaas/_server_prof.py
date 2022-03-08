@@ -7,13 +7,11 @@ import atexit
 import os
 import time
 
-from . import kaas
-
 from . import cutlass
 
 from . import complexCutlass
 
-logLevel = logging.INFO
+logLevel = logging.WARN
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logLevel)
 
 # Profiling level sets how aggressive we are in profiling.
@@ -105,11 +103,11 @@ metricSpecial = ['t_invoke']
 
 class kaasBuf():
     @classmethod
-    def fromSpec(cls, spec, src=None):
-        return cls(spec[0], spec[2], src,
-                   size=spec[1], ephemeral=spec[3])
+    def fromSpec(cls, bID, spec, src=None):
+        return cls(bID, spec.name, spec.key, src,
+                   size=spec.size, offset=spec.offset, ephemeral=spec.ephemeral)
 
-    def __init__(self, name, key, src, size=None, ephemeral=False):
+    def __init__(self, bID, name, key, src, size=None, offset=0, ephemeral=False):
         """A kaasBuffer represnts a binary data buffer managed by the kaas
         system, it can be either on the device or on the host. If src is
         provided, it will be used as the buffer, otherwise size will be used to
@@ -117,22 +115,26 @@ class kaasBuf():
         consistency, it is up to the user to decide when and how to synchronize
         host and device memory.
         """
+        self.bID = bID
         self.name = name
         self.key = key
         self.dirty = False
         self.ephemeral = ephemeral
         self.useCount = 0
 
-        if src is not None:
-            self.dbuf = None
-            self.hbuf = memoryview(src)
-            self.size = self.hbuf.nbytes
-            self.onDevice = False
-        else:
-            self.dbuf = None
+        self.dbuf = None
+        self.onDevice = False
+
+        if src is None:
             self.hbuf = None
+        else:
+            self.hbuf = memoryview(src)
+
+        self.offset = offset
+        if size is None:
+            self.size = self.hbuf.nbytes
+        else:
             self.size = size
-            self.onDevice = False
 
     def __str__(self):
         return self.name
@@ -141,19 +143,28 @@ class kaasBuf():
         return "KaaS Buffer (name={}, key={}, dirty={}, ephemeral={}, onDevice={}, size={})".format(
                 self.name, self.key, self.dirty, self.ephemeral, self.onDevice, self.size)
 
-    def setHostBuffer(self, newBuf):
-        """Allows changing the host-side memory allocated to this buffer. This
-        is useful for zero copy data transfers. The newBuf must be bigger or
-        equal to the kaasBuf size. If newBuf is None, the kaasBuf will drop its
-        reference to any host buffer, allowing host memory to be reclaimed."""
+    def updateValue(self, newBuf):
+        """Replace the data in this buffer. If there is already a device
+        buffer, it will be updated as well. If there is no existing device
+        buffer, we will not allocate one. If newBuf==None, we will free host
+        memory, but the device buffer will not be updated (use clear() for
+        that)."""
         if newBuf is None:
             self.hbuf = None
         else:
             newBuf = memoryview(newBuf)
-            if newBuf.nbytes < self.size:
-                raise kaas.KaasError("New buffer is not big enough")
+            if newBuf.nbytes != self.size:
+                # Maybe this should be an error. If self.size < newBuf.nbytes
+                # we'll get a CUDA error, otherwise it's a warning
+                logging.warn(f"(buffer {self.bID}) Unexpected size for new data: buffer is {self.size} but new value is {newBuf.nbytes}")
 
             self.hbuf = newBuf
+            if self.onDevice:
+                logging.debug(f"Moving {self.size}B from host buffer '{self.name}' to device address 0x{hex(int(self.dbuf))}")
+                pstart = startTimer()
+                cuda.memcpy_htod(self.dbuf, self.hbuf[self.offset:self.size])
+                profSync()
+                updateTimer('t_htod', pstart, final=False)
 
     def toDevice(self):
         """Place the buffer onto the device if it is not already there.  If no
@@ -173,7 +184,8 @@ class kaasBuf():
             if self.hbuf is not None:
                 logging.debug(f"Moving {self.size}B from host buffer '{self.name}' to device address 0x{hex(int(self.dbuf))}")
                 pstart = startTimer()
-                cuda.memcpy_htod(self.dbuf, self.hbuf)
+                # cuda.memcpy_htod(self.dbuf, self.hbuf)
+                cuda.memcpy_htod(self.dbuf, self.hbuf[self.offset:self.size])
                 profSync()
                 updateTimer('t_htod', pstart, final=False)
 
@@ -198,7 +210,7 @@ class kaasBuf():
 
             updateProf('s_dtoh', self.size)
             pstart = startTimer()
-            cuda.memcpy_dtoh(self.hbuf, self.dbuf)
+            cuda.memcpy_dtoh(self.hbuf[self.offset:], self.dbuf)
             profSync()
             updateTimer('t_dtoh', pstart, final=False)
 
@@ -404,18 +416,16 @@ class bufferCache():
         batching frees()."""
         total = 0
         for bSpec in bSpecs:
-            key = bSpec[2]
-            size = bSpec[1]
-            cacheBuf = self.bufs.get(key, None)
+            cacheBuf = self.bufs.get(bSpec.key, None)
             if cacheBuf is None:
                 updateProf('n_devDMiss', 1)
-                total += size
+                total += bSpec.size
             else:
                 if cacheBuf.onDevice:
                     updateProf('n_devDHit', 1)
                 else:
                     updateProf('n_devDMiss', 1)
-                    total += size
+                    total += bSpec.size
 
         pstart = startTimer()
         self.makeRoom(total)
@@ -428,45 +438,64 @@ class bufferCache():
         re-read (you should probably make sure this doesn't happen by flushing
         when needed)."""
 
-        key = bSpec.key
+        # key = bSpec.key
+        bID = f"{clientID}:{bSpec.name}"
 
-        if bSpec.ephemeral:
-            key = f"{clientID}:{key}"
-
-        buf = self.bufs.get(key, None)
-        if buf is not None:
-            logging.debug("Loading from Cache: {}".format(bSpec.name))
-            updateProf('n_hostDHit', 1)
-
-            # Reset LRU
-            if buf.onDevice:
-                self.policy.remove(buf)
-        else:
-            updateProf('n_hostDMiss', 1)
+        buf = self.bufs.get(bID, None)
+        if buf is None:
             if bSpec.ephemeral or overwrite:
-                logging.debug("Loading (new buffer): {}".format(bSpec.name))
-                buf = kaasBuf.fromSpec(bSpec)
-
-                if buf.ephemeral:
-                    self.ephemerals[key] = buf
+                logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{bSpec.size}")
+                hbuf = None
             else:
-                pstart = startTimer()
-                raw = self.kv.get(key, profile=getProf(mod='kv'), profFinal=False)
-                updateTimer('t_hostDLoad', pstart, final=False)
+                hbuf = self.kv.get(bSpec.key)
+                logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{len(hbuf)}")
 
-                if raw is None:
-                    logging.debug("Loading (new buffer): {}".format(bSpec.name))
-                    buf = kaasBuf.fromSpec(bSpec)
-                else:
-                    logging.debug("Loading from KV: {} (key: {})".format(bSpec.name, key))
-                    updateProf('s_hostDLoad', bSpec.size)
-                    buf = kaasBuf.fromSpec(bSpec, raw)
+            buf = kaasBuf.fromSpec(bID, bSpec, src=hbuf)
+
+            if bSpec.ephemeral:
+                self.ephemerals[bID] = buf
+
+            self.bufs[bID] = buf
+        else:
+            if buf.key != bSpec.key and not (bSpec.ephemeral or overwrite):
+                logging.debug(f"Loading new value into buffer {bID} from key {bSpec.key}")
+                hbuf = self.kv.get(bSpec.key)
+                buf.updateValue(hbuf)
+            else:
+                logging.debug(f"Re-using cached buffer {bID}")
+
+        # buf = self.bufs.get(key, None)
+        # if buf is not None:
+        #     logging.debug("Loading from Cache: {}".format(bSpec.name))
+        #     updateProf('n_hostDHit', 1)
+        #
+        #     # Reset LRU
+        #     if buf.onDevice:
+        #         self.policy.remove(buf)
+        # else:
+        #     updateProf('n_hostDMiss', 1)
+        #     if bSpec.ephemeral or overwrite:
+        #         logging.debug("Loading (new buffer): {}".format(bSpec.name))
+        #         buf = kaasBuf.fromSpec(bSpec)
+        #
+        #         if buf.ephemeral:
+        #             self.ephemerals[key] = buf
+        #     else:
+        #         pstart = startTimer()
+        #         raw = self.kv.get(key, profile=getProf(mod='kv'), profFinal=False)
+        #         updateTimer('t_hostDLoad', pstart, final=False)
+        #
+        #         if raw is None:
+        #             logging.debug("Loading (new buffer): {}".format(bSpec.name))
+        #             buf = kaasBuf.fromSpec(bSpec)
+        #         else:
+        #             logging.debug("Loading from KV: {} (key: {})".format(bSpec.name, key))
+        #             updateProf('s_hostDLoad', bSpec.size)
+        #             buf = kaasBuf.fromSpec(bSpec, src=raw)
 
         self.makeRoom(buf.size)
 
         self.size += buf.toDevice()
-
-        self.bufs[key] = buf
 
         return buf
 
@@ -474,10 +503,10 @@ class bufferCache():
         buf.useCount += 1
         self.policy.push(buf)
 
-    def dirty(self, key):
-        buf = self.bufs[key]
+    def dirty(self, bID):
+        buf = self.bufs[bID]
         buf.dirty = True
-        self.dirtyBufs[key] = buf
+        self.dirtyBufs[bID] = buf
 
     def _flushOne(self, buf):
         if buf.dirty:
@@ -499,12 +528,12 @@ class bufferCache():
 
         self.dirtyBufs = {}
 
-    def drop(self, key):
+    def drop(self, bID):
         """Remove a buffer from the cache (writing back if dirty). This frees
         any device memory and drops references to the host buffer (Python's GC
         will pick it up eventually)."""
-        logging.debug("Dropping " + str(key))
-        buf = self.bufs[key]
+        logging.debug("Dropping " + str(bID))
+        buf = self.bufs[bID]
         self._flushOne(buf)
 
         if buf.onDevice:
@@ -585,7 +614,7 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
                 updateTimer('t_setupArgs', pstart, final=False)
 
                 if (ioType == 'o' or ioType == 'io') and not argBuf.ephemeral:
-                    bCache.dirty(argBuf.key)
+                    bCache.dirty(argBuf.bID)
                     visibleOutputs[argBuf.key] = None
 
                 arguments.append(argBuf)
@@ -599,25 +628,6 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
 
             for buf in arguments:
                 bCache.release(buf)
-
-            # ***********************
-            # It turns out on the big models, cudaMM is dominant. We should measure
-            # it, but the overhead of extra evictions and stuff is unlikely to
-            # outweight the opportunity for buffer re-use. We just bzero stuff
-            # instead.
-            # ***********************
-            # # Don't bother waiting for the caching policy on temps, they will for
-            # # sure never be needed again. In the future we may avoid this to save
-            # # on cudaMalloc.
-            # for t in kSpec.temps:
-            #     bCache.drop(t.key)
-            #
-            # # For now, we assume we'll never re-use non-constant inputs. It's true
-            # # for current workloads but not in general. This saves us a bunch of
-            # # time spent evicting stuff.
-            # for bSpec in kSpec.inputs:
-            #     if not bSpec.const:
-            #         bCache.drop(bSpec.key)
 
     # Make sure all outputs are visible externally (basically this merges our
     # private state into whatever consistency properties the KV gives us.

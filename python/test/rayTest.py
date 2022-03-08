@@ -132,5 +132,5 @@ def testPool():
 if __name__ == "__main__":
     ray.init()
 
-    # testMinimal()
-    testPool()
+    testMinimal()
+    # testPool()
