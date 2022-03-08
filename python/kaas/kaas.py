@@ -31,10 +31,11 @@ class bufferSpec():
                    ephemeral=d.get('ephemeral', False),
                    const=d.get('const', False))
 
-    def __init__(self, name, size, key=None, ephemeral=False, const=False):
+    def __init__(self, name, size, offset=0, key=None, ephemeral=False, const=False):
         """Arguments:
             name - internal name for this buffer
             size - size of the buffer (in bytes)
+            offset - offset within the object to start reading from
             key - For non-epehemeral buffers, this is the key in the kv store
                   to use. If key is not specified, name is used as the key.
             epehemeral - If true, this buffer does not interact with the KV store
@@ -52,6 +53,7 @@ class bufferSpec():
 
         # Size of the buffer in bytes
         self.size = size
+        self.offset = offset
 
         # Ephemeral buffers never leave the current node. If not ephemeral, the
         # buffer will be backed by a KV store.
@@ -68,6 +70,7 @@ class bufferSpec():
         return {
                 'name': self.name,
                 'size': self.size,
+                'offset': self.offset,
                 'key': self.key,
                 'ephemeral': self.ephemeral,
                 'const': self.const
@@ -193,45 +196,14 @@ class kernelSpec():
         return self.name == other.name
 
 
-# class kaasReq():
-#     @classmethod
-#     def fromDict(cls, d):
-#         kernels = [kernelSpec.fromDict(ks) for ks in d['kernels']]
-#         if 'nIter' in d:
-#             nIter = d['nIter']
-#         else:
-#             nIter = 1
-#         return cls(kernels, nIter=nIter)
-#
-#     def __init__(self, kernels, nIter=1):
-#         """Turn a list of kernelSpecs into a kaas Request"""
-#         self.kernels = kernels
-#         self.nIter = nIter
-#
-#     def reKey(self, keyMap):
-#         """Renames kv keys for non-ephemeral buffers based on a keyMap.
-#         Internal names remain the same and epehemeral buffers are not affected.
-#         keyMap: {internalName -> newKey}
-#         """
-#         for kern in self.kernels:
-#             for buf in kern.arguments:
-#                 if not buf.ephemeral:
-#                     if buf.name in keyMap:
-#                         buf.key = keyMap[buf.name]
-#
-#     def toDict(self):
-#         return {"kernels": [k.toDict() for k in self.kernels],
-#                 "nIter": self.nIter}
-#
-
 denseBuf = collections.namedtuple("denseBuf",
                                   ['name', 'size', 'key', 'ephemeral', 'const'])
 
-denseLiteral = collections.namedtuple("denseLiteral", ['type', 'val'])
+denseLiteral = collections.namedtuple("denseLiteral", ['dtype', 'val'])
 
 denseKern = collections.namedtuple("denseKern",
-                                   ['library', 'kernel', 'gridDim', 'blockDim',
-                                    'sharedSize', 'literals', 'arguments'])
+                                   ['name', 'library', 'kernel', 'gridDim', 'blockDim',
+                                    'sharedSize', 'literals', 'arguments', 'ioTypes'])
 
 
 class kaasReq():
@@ -239,11 +211,6 @@ class kaasReq():
     kernelSpecs (in order of invocation) and their associated bufferSpecs. It
     is designed to be fast to serialize and modify, though it's less pleasant
     to work with. We use tuples for everything:
-        - buffers:  (0 name, 1 size, 2 key, 3 ephemeral?, 4 const?)
-        - kernels:  (0 name, 1 libraryPath, 2 kernelFunc,
-                     3 gridDim, 4 blockDim, 5 sharedSize,
-                     6 literals, 7 arguments, 8 ioTypes)
-        - literals: (0 type, 1 value)
     """
     @classmethod
     def fromDict(cls, d):
@@ -263,17 +230,20 @@ class kaasReq():
             arguments = []
             for buf in kern.arguments:
                 if buf.name not in self.bufferMap:
-                    self.bufferMap[buf.name] = (buf.name, buf.size, buf.key, buf.ephemeral, buf.const)
+                    self.bufferMap[buf.name] = denseBuf(buf.name, buf.size, buf.key,
+                                                        buf.ephemeral, buf.const)
                 arguments.append(buf.name)
 
-            literals = [(literal.t, literal.val) for literal in kern.literals]
-            dKern = (kern.name, str(kern.libPath), kern.kernel,
-                     kern.gridDim, kern.blockDim, kern.sharedSize,
-                     literals, arguments, kern.type_list)
+            literals = [denseLiteral(literal.t, literal.val) for literal in kern.literals]
+            dKern = denseKern(kern.name, str(kern.libPath), kern.kernel,
+                              kern.gridDim, kern.blockDim, kern.sharedSize,
+                              literals, arguments, kern.type_list)
 
             self.kernels.append(dKern)
 
     def reKey(self, keyMap):
         for name, newKey in keyMap.items():
             oldBuf = self.bufferMap[name]
-            self.bufferMap[name] = (oldBuf[0], oldBuf[1], newKey, oldBuf[3], oldBuf[4])
+            # self.bufferMap[name] = denseBuf(oldBuf[0], oldBuf[1], newKey, oldBuf[3], oldBuf[4])
+            self.bufferMap[name] = denseBuf(oldBuf.name, oldBuf.size, newKey,
+                                            oldBuf.ephemeral, oldBuf.const)

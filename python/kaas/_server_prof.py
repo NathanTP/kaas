@@ -243,7 +243,7 @@ class kaasFunc():
               after invocation
         """
 
-        literalVals = [lit[1] for lit in literals]
+        literalVals = [lit.val for lit in literals]
 
         dAddrs = []
         for b in bufs:
@@ -287,28 +287,24 @@ class kernelCache():
         self.complexAdapter = complexCutlass.loadAdapter()
 
     def get(self, spec):
-        name = spec[0]
-        if name not in self.kerns:
-            libPath = spec[1]
-            args = spec[7]
-            literals = spec[6]
-            kernelFunc = spec[2]
-
+        if spec.name not in self.kerns:
             updateProf('n_KMiss', 1)
             pstart = startTimer()
             try:
-                if libPath not in self.libs:
-                    self.libs[libPath] = cuda.module_from_file(libPath)
+                if spec.library not in self.libs:
+                    self.libs[spec.library] = cuda.module_from_file(spec.library)
             except pycuda._driver.RuntimeError as e:
-                raise RuntimeError(f"Could not load kaas library at {libPath}: {e.args}") from e
+                # raise RuntimeError(f"Could not load kaas library at {libPath}: {e.args}") from e
+                raise RuntimeError(f"Could not load kaas library at {spec.library}: {e.args}") from e
 
-            litTypes = [lit[0] for lit in literals]
-            self.kerns[name] = kaasFunc(self.libs[libPath], kernelFunc, litTypes, len(args))
+            litTypes = [lit.dtype for lit in spec.literals]
+            self.kerns[spec.name] = kaasFunc(self.libs[spec.library], spec.kernel,
+                                             litTypes, len(spec.arguments))
             updateTimer('t_kernelLoad', pstart, final=False)
         else:
             updateProf('n_KHit', 1)
 
-        return self.kerns[name]
+        return self.kerns[spec.name]
 
 
 class lruPolicy():
@@ -432,17 +428,14 @@ class bufferCache():
         re-read (you should probably make sure this doesn't happen by flushing
         when needed)."""
 
-        name = bSpec[0]
-        size = bSpec[1]
-        key = bSpec[2]
-        ephemeral = bSpec[3]
+        key = bSpec.key
 
-        if ephemeral:
+        if bSpec.ephemeral:
             key = f"{clientID}:{key}"
 
         buf = self.bufs.get(key, None)
         if buf is not None:
-            logging.debug("Loading from Cache: {}".format(name))
+            logging.debug("Loading from Cache: {}".format(bSpec.name))
             updateProf('n_hostDHit', 1)
 
             # Reset LRU
@@ -450,8 +443,8 @@ class bufferCache():
                 self.policy.remove(buf)
         else:
             updateProf('n_hostDMiss', 1)
-            if ephemeral or overwrite:
-                logging.debug("Loading (new buffer): {}".format(name))
+            if bSpec.ephemeral or overwrite:
+                logging.debug("Loading (new buffer): {}".format(bSpec.name))
                 buf = kaasBuf.fromSpec(bSpec)
 
                 if buf.ephemeral:
@@ -462,11 +455,11 @@ class bufferCache():
                 updateTimer('t_hostDLoad', pstart, final=False)
 
                 if raw is None:
-                    logging.debug("Loading (new buffer): {}".format(name))
+                    logging.debug("Loading (new buffer): {}".format(bSpec.name))
                     buf = kaasBuf.fromSpec(bSpec)
                 else:
-                    logging.debug("Loading from KV: {} (key: {})".format(name, key))
-                    updateProf('s_hostDLoad', size)
+                    logging.debug("Loading from KV: {} (key: {})".format(bSpec.name, key))
+                    updateProf('s_hostDLoad', bSpec.size)
                     buf = kaasBuf.fromSpec(bSpec, raw)
 
         self.makeRoom(buf.size)
@@ -581,11 +574,8 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
             updateProf('n_invoke', 1)
             kern = kCache.get(kSpec)
 
-            specArgs = kSpec[7]
-            ioTypes = kSpec[8]
-
             arguments = []
-            for argName, ioType in zip(specArgs, ioTypes):
+            for argName, ioType in zip(kSpec.arguments, kSpec.ioTypes):
                 arg = req.bufferMap[argName]
                 pstart = startTimer()
                 if ioType == 'o':
@@ -601,7 +591,8 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
                 arguments.append(argBuf)
 
             pstart = startTimer()
-            timer = kern.Invoke(kSpec[6], arguments, kSpec[3], kSpec[4], kSpec[5])
+            timer = kern.Invoke(kSpec.literals, arguments,
+                                kSpec.gridDim, kSpec.blockDim, kSpec.sharedSize)
             profSync()
             updateTimer('t_invokeExternal', pstart, final=False)
             invokeTimes.append(timer)
