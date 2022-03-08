@@ -40,17 +40,24 @@ def checkSum(resArray, testArray):
         return True
 
 
-def getDotReq(nElem):
+def getDotReq(nElem, offset=False):
     nByte = nElem*4
 
     aArr = np.arange(0, nElem, dtype=np.uint32)
     bArr = np.arange(nElem, nElem*2, dtype=np.uint32)
 
-    aRef = ray.put(aArr)
-    bRef = ray.put(bArr)
-
-    aBuf = kaas.bufferSpec('inpA', nByte, key=kaas.ray.putObj(aRef))
-    bBuf = kaas.bufferSpec('inpB', nByte, key=kaas.ray.putObj(bRef))
+    if offset:
+        combinedArr = np.concatenate((aArr, bArr))
+        combinedRef = ray.put(combinedArr)
+        aBuf = kaas.bufferSpec('inpA', nByte, offset=0, key=kaas.ray.putObj(combinedRef))
+        bBuf = kaas.bufferSpec('inpB', nByte, offset=nByte, key=kaas.ray.putObj(combinedRef))
+        inpRefs = [combinedRef]
+    else:
+        aRef = ray.put(aArr)
+        bRef = ray.put(bArr)
+        aBuf = kaas.bufferSpec('inpA', nByte, key=kaas.ray.putObj(aRef))
+        bBuf = kaas.bufferSpec('inpB', nByte, key=kaas.ray.putObj(bRef))
+        inpRefs = [aRef, bRef]
 
     prodOutBuf = kaas.bufferSpec('prodOut', nByte, ephemeral=True)
     cBuf = kaas.bufferSpec('output', 8, key='c')
@@ -73,7 +80,7 @@ def getDotReq(nElem):
     req = kaas.kaasReq([prodKern, sumKern])
     reqRef = ray.put(req)
 
-    return reqRef, [aRef, bRef], [aArr, bArr]
+    return reqRef, inpRefs, [aArr, bArr]
 
 
 def checkDot(got, aArr, bArr):
@@ -90,7 +97,7 @@ def checkDot(got, aArr, bArr):
 
 def testMinimal():
     """Test the minimal set of functionality for KaaS"""
-    reqRef, _, inputArrs = getDotReq(1024)
+    reqRef, _, inputArrs = getDotReq(1024, offset=True)
 
     taskResRef = kaas.ray.invokerTask.remote((reqRef, {}))
 
@@ -113,8 +120,7 @@ def testPool():
     # initialized in case we want to avoid cold starts.
     ray.get(pool.ensureReady.remote())
 
-    # reqRef, inpRef, testArray = getTestReq(32)
-    reqRef, inpRefs, inputArrs = getDotReq(1024)
+    reqRef, inpRefs, inputArrs = getDotReq(1024, offset=True)
 
     poolResRef = pool.run.remote('invoke', 1, clientID, inpRefs, [(reqRef, {})], {"clientID": clientID})
 
@@ -132,5 +138,5 @@ def testPool():
 if __name__ == "__main__":
     ray.init()
 
-    testMinimal()
-    # testPool()
+    # testMinimal()
+    testPool()

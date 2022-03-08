@@ -128,7 +128,7 @@ class kaasBuf():
         if src is None:
             self.hbuf = None
         else:
-            self.hbuf = memoryview(src)
+            self.hbuf = memoryview(src).cast('B')
 
         self.offset = offset
         if size is None:
@@ -152,7 +152,7 @@ class kaasBuf():
         if newBuf is None:
             self.hbuf = None
         else:
-            newBuf = memoryview(newBuf)
+            newBuf = memoryview(newBuf).cast('B')
             if newBuf.nbytes != self.size:
                 # Maybe this should be an error. If self.size < newBuf.nbytes
                 # we'll get a CUDA error, otherwise it's a warning
@@ -184,8 +184,7 @@ class kaasBuf():
             if self.hbuf is not None:
                 logging.debug(f"Moving {self.size}B from host buffer '{self.name}' to device address 0x{hex(int(self.dbuf))}")
                 pstart = startTimer()
-                # cuda.memcpy_htod(self.dbuf, self.hbuf)
-                cuda.memcpy_htod(self.dbuf, self.hbuf[self.offset:self.size])
+                cuda.memcpy_htod(self.dbuf, self.hbuf[self.offset:self.offset+self.size])
                 profSync()
                 updateTimer('t_htod', pstart, final=False)
 
