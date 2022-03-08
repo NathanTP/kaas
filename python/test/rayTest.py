@@ -1,3 +1,4 @@
+#!/usr/bin/env python
 import kaas
 import kaas.ray
 import kaas.pool
@@ -9,7 +10,7 @@ import numpy as np
 testPath = pathlib.Path(__file__).resolve().parent
 
 
-def getTestReq(arrLen):
+def getSumReq(arrLen):
     testArray = np.arange(0, arrLen, dtype=np.uint32)
     inpRef = ray.put(testArray)
 
@@ -26,7 +27,7 @@ def getTestReq(arrLen):
     return reqRef, inpRef, testArray
 
 
-def checkRes(resArray, testArray):
+def checkSum(resArray, testArray):
     expect = testArray.sum()
     got = resArray.sum()
     if got != expect:
@@ -39,9 +40,57 @@ def checkRes(resArray, testArray):
         return True
 
 
+def getDotReq(nElem):
+    nByte = nElem*4
+
+    aArr = np.arange(0, nElem, dtype=np.uint32)
+    bArr = np.arange(nElem, nElem*2, dtype=np.uint32)
+
+    aRef = ray.put(aArr)
+    bRef = ray.put(bArr)
+
+    aBuf = kaas.bufferSpec('inpA', nByte, key=kaas.ray.putObj(aRef))
+    bBuf = kaas.bufferSpec('inpB', nByte, key=kaas.ray.putObj(bRef))
+
+    prodOutBuf = kaas.bufferSpec('prodOut', nByte, ephemeral=True)
+    cBuf = kaas.bufferSpec('output', 8, key='c')
+
+    args_prod = [(aBuf, 'i'), (bBuf, 'i'), (prodOutBuf, 'o')]
+
+    prodKern = kaas.kernelSpec(testPath / 'kerns' / 'testKerns.cubin',
+                               'prodKern',
+                               (1, 1), (nElem, 1, 1),
+                               literals=[kaas.literalSpec('Q', nElem)],
+                               arguments=args_prod)
+
+    args_sum = [(prodOutBuf, 'i'), (cBuf, 'o')]
+
+    sumKern = kaas.kernelSpec(testPath / 'kerns' / 'testKerns.cubin',
+                              'sumKern',
+                              (1, 1), (nElem // 2, 1, 1),
+                              arguments=args_sum)
+
+    req = kaas.kaasReq([prodKern, sumKern])
+    reqRef = ray.put(req)
+
+    return reqRef, [aRef, bRef], [aArr, bArr]
+
+
+def checkDot(got, aArr, bArr):
+    expect = np.dot(aArr, bArr)
+    if got != expect:
+        print("Fail: results don't match")
+        print("\tExpect: ", expect)
+        print("\tGot: ", got)
+        return False
+    else:
+        print("PASS")
+        return True
+
+
 def testMinimal():
     """Test the minimal set of functionality for KaaS"""
-    reqRef, _, testArray = getTestReq(32)
+    reqRef, _, inputArrs = getDotReq(1024)
 
     taskResRef = kaas.ray.invokerTask.remote((reqRef, {}))
 
@@ -52,7 +101,7 @@ def testMinimal():
     resArray = ray.get(kaasOutRef)
     resArray.dtype = np.uint32
 
-    return checkRes(resArray, testArray)
+    return checkDot(resArray[0], inputArrs[0], inputArrs[1])
 
 
 def testPool():
@@ -64,9 +113,10 @@ def testPool():
     # initialized in case we want to avoid cold starts.
     ray.get(pool.ensureReady.remote())
 
-    reqRef, inpRef, testArray = getTestReq(32)
+    # reqRef, inpRef, testArray = getTestReq(32)
+    reqRef, inpRefs, inputArrs = getDotReq(1024)
 
-    poolResRef = pool.run.remote('invoke', 1, clientID, [inpRef], [(reqRef, {})], {"clientID": clientID})
+    poolResRef = pool.run.remote('invoke', 1, clientID, inpRefs, [(reqRef, {})], {"clientID": clientID})
 
     # The pool itself returns a reference to whatever the output of the actor
     # is. The actor returns a reference to whatever the kaas server returns.
@@ -76,7 +126,7 @@ def testPool():
     resArray = ray.get(kaasOutRef)
     resArray.dtype = np.uint32
 
-    return checkRes(resArray, testArray)
+    return checkDot(resArray[0], inputArrs[0], inputArrs[1])
 
 
 if __name__ == "__main__":
