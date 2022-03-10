@@ -446,8 +446,9 @@ class bufferCache():
                 logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{bSpec.size}")
                 hbuf = None
             else:
+                #XXX need to track repeated keys so we don't store a million copies of the same buffer (this could be serious for things like BERT where the aggregate constant size is huge and it has many constants).
                 hbuf = self.kv.get(bSpec.key)
-                logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{len(hbuf)}")
+                logging.debug(f"Loading buffer from KV: bID:{bID}, name:{bSpec.name}, size:{len(hbuf)}, key:{bSpec.key}")
 
             buf = kaasBuf.fromSpec(bID, bSpec, src=hbuf)
 

@@ -242,6 +242,22 @@ class kaasReq():
 
             self.kernels.append(dKern)
 
+    def __str__(self):
+        val = ""
+        val += f"Kernels (nIter={self.nIter}):\n"
+        for i, kern in enumerate(self.kernels):
+            val += f"{i}: {kern.name}\n"
+            val += f"\t: Dims: {kern.gridDim}x{kern.gridDim}\n"
+            val += "\t: Arguments:\n"
+            for lit in kern.literals:
+                val += f"\t\tLiteral: ({lit.dtype}){lit.val}\n"
+
+            for bName in kern.arguments:
+                buf = self.bufferMap[bName]
+                val += f"\t\t{buf.name}: size={buf.size} offset={buf.offset} ephemeral={buf.ephemeral} const={buf.const}\n"
+            val += "\n"
+        return val
+
     def reKey(self, keyMap):
         for name, newKey in keyMap.items():
             oldBuf = self.bufferMap[name]
