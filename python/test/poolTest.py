@@ -1,17 +1,17 @@
 #!/usr/bin/env python
 import ray
-import kaas.pool2
+import kaas.pool
 
 
 @ray.remote
-class TestWorker(kaas.pool2.PoolWorker):
+class TestWorker(kaas.pool.PoolWorker):
     def exampleMethod(self, arg):
         return f"val is {arg}"
 
 
 def minTest(policy):
     groupID = "exampleGroup"
-    pool = kaas.pool2.Pool.remote(3, policy=policy)
+    pool = kaas.pool.Pool.remote(3, policy=policy)
     registerConfirm = pool.registerGroup.remote(groupID, TestWorker)
     ray.get(registerConfirm)
 
@@ -32,13 +32,13 @@ def minTest(policy):
 if __name__ == "__main__":
     ray.init()
     print("Min test BalancePolicy")
-    if not minTest(kaas.pool2.BalancePolicy):
+    if not minTest(kaas.pool.BalancePolicy):
         print("FAIL")
     else:
         print("SUCCESS")
 
     print("Min test ExclusivePolicy")
-    if not minTest(kaas.pool2.ExclusivePolicy):
+    if not minTest(kaas.pool.ExclusivePolicy):
         print("FAIL")
     else:
         print("SUCCESS")

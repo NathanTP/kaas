@@ -6,7 +6,6 @@ VERSION = '0.0.1'
 with open("requirements.txt", "r") as f:
     install_requires = f.read().splitlines()
 
-print(install_requires)
 if shutil.which('nvcc') is None:
     install_requires.remove('pycuda')
 
@@ -30,6 +29,6 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: Linux",
     ],
-    python_requires='>=3.8',
+    python_requires='>=3.9',
     include_package_data=True
 )
