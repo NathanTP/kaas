@@ -1,21 +1,17 @@
 import setuptools
 import shutil
-import subprocess as sp
-import pathlib
 
 VERSION = '0.0.1'
 
 with open("requirements.txt", "r") as f:
-    install_requires = f.readlines()
+    install_requires = f.read().splitlines()
 
-if shutil.which('nvcc') is not None:
-    install_requires.append('pycuda')
+print(install_requires)
+if shutil.which('nvcc') is None:
+    install_requires.remove('pycuda')
 
 with open("../README.md", "r") as fh:
     long_description = fh.read()
-
-#XXX
-# sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/cutlass', check=True)
 
 setuptools.setup(
     name="kaas",

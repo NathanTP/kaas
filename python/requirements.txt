@@ -1,3 +1,2 @@
-# Also requires libff (from this same repo)
 pycuda
 numpy
