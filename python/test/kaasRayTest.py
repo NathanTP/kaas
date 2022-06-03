@@ -113,23 +113,22 @@ def testMinimal():
 
 def testPool():
     """Test the pool mechanism"""
-    clientID = 'testClient'
-    pool = kaas.pool.Pool.remote(1, 'balance', kaas.ray.invokerActor)
+    groupID = 'testClient'
+    pool = kaas.pool.Pool(1, policy=kaas.pool.BalancePolicy)
 
-    # This step is not required, but it ensures that the pool is completely
-    # initialized in case we want to avoid cold starts.
-    ray.get(pool.ensureReady.remote())
+    pool.registerGroup(groupID, kaas.ray.invokerActor)
 
     reqRef, inpRefs, inputArrs = getDotReq(1024, offset=True)
 
-    poolResRef = pool.run.remote('invoke', 1, clientID, inpRefs, [(reqRef, {})], {"clientID": clientID})
+    poolResRef = pool.run(groupID, 'invoke', args=[(reqRef, {})], kwargs={"clientID": groupID})
 
-    # The pool itself returns a reference to whatever the output of the actor
-    # is. The actor returns a reference to whatever the kaas server returns.
-    # The kaas server returns a reference to the result array.
-    actorResRef = ray.get(poolResRef)
-    kaasOutRef = ray.get(actorResRef)
-    resArray = ray.get(kaasOutRef)
+    # See the pool docs for details, but it returns a ref(actor return
+    # references)).
+    # The actor in this case is the KaaS executor that returns a reference to
+    # the KaaS invocation outputs.
+    executorResRef = ray.get(poolResRef)
+    kaasResRef = ray.get(executorResRef)
+    resArray = ray.get(kaasResRef)
     resArray.dtype = np.uint32
 
     return checkDot(resArray[0], inputArrs[0], inputArrs[1])
@@ -138,5 +137,8 @@ def testPool():
 if __name__ == "__main__":
     ray.init()
 
-    # testMinimal()
+    print("Minimal test")
+    testMinimal()
+
+    print("Pool Test")
     testPool()

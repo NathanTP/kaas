@@ -6,7 +6,7 @@ import collections
 import abc
 
 
-PoolReq = collections.namedtuple('PoolReq', ['groupID', 'fName', 'nReturn', 'args', 'kwargs', 'resFuture'])
+PoolReq = collections.namedtuple('PoolReq', ['groupID', 'fName', 'num_returns', 'args', 'kwargs', 'resFuture'])
 
 
 class PoolError(Exception):
@@ -162,8 +162,10 @@ class BalancePolicy(Policy):
             wID, worker = self.freeWorkers.popitem()
             self.busyWorkers[wID] = worker
 
+            #XXX
+            nReturns = req.num_returns + 1
             resRefs = worker._runWithCompletion.options(
-                num_returns=req.nReturn + 1).remote(
+                num_returns=nReturns).remote(
                 req.fName, req.args, req.kwargs)
 
             req.resFuture.set_result(resRefs[1:])
@@ -245,7 +247,6 @@ class ExclusivePolicy(Policy):
         return newRuns
 
 
-@ray.remote
 class Pool():
     """Generic worker pool class. Users must register at least one named group
     of workers. Worker groups are the unit of isolation in the Pool. They are
@@ -266,10 +267,55 @@ class Pool():
         types and other fairness properties.
     """
 
-    # The Pool is implemented as an asyncio actor that internally runs an event
-    # loop (handleEvent). Events include new requests via run() or worker
-    # completions via a "Done" reference. For each event, the Pool updates the
-    # Policy which handles the actual pool management and worker invocation.
+    def __init__(self, maxWorkers, policy: Policy = BalancePolicy, nGPUs=0):
+        """Arguments:
+            maxWorkers: The total number of concurrent workers to allow
+            policy: Scheduling policy class to use
+            nGPUs: Number of GPUs to assign to each worker. Pool does not
+                   currently support per-group nGPUs.
+        """
+        self.pool = _PoolActor.remote(maxWorkers, policy=policy, nGPUs=nGPUs)
+
+    def registerGroup(self, groupID, workerClass: PoolWorker):
+        """Register a new group of workers with this pool. Users must register
+        at least one group before calling run().
+        """
+        registerConfirm = self.pool.registerGroup.remote(groupID, workerClass)
+        ray.get(registerConfirm)
+
+    def registerGroupAsync(self, groupID, workerClass: PoolWorker):
+        """Like registerGroup() but returns immediately with a reference that
+        must be waited on before sending requests for this group."""
+        return self.pool.registerGroup.remote(groupID, workerClass)
+
+    def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None):
+        """Schedule some work on the pool.
+
+        Arguments:
+            groupID: Which worker type to use.
+            methodName: Method name within the worker to invoke.
+            num_returns: Number of return values for this invocation.
+            args, kwargs: Arguments to pass to the method
+
+        Returns:
+            Worker return references -
+                The pool returns as soon as the request is issued to a worker.
+                It returns a reference to whatever the worker invocation would
+                return (i.e. a reference or list of references to the remote
+                method's returns). In practice, this means that callers will
+                need to dereference twice: once to get the worker return
+                reference(s), and again to get the value of those return(s).
+        """
+        return self.pool.run.remote(groupID, methodName, num_returns=num_returns, args=args, kwargs=kwargs)
+
+
+@ray.remote
+class _PoolActor():
+    """The Pool is implemented as an asyncio actor that internally runs an event
+    loop (handleEvent). Events include new requests via run() or worker
+    completions via a "Done" reference. For each event, the Pool updates the
+    Policy which handles the actual pool management and worker invocation."""
+
     def __init__(self, maxWorkers, policy: Policy = BalancePolicy, nGPUs=0):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
@@ -296,28 +342,44 @@ class Pool():
         at least one group before calling run()."""
         self.policy.registerGroup(groupID, workerClass)
 
-    async def run(self, groupID, methodName, nReturn, args=(), kwargs=None):
-        """Users call run() to schedule some work on the pool, it returns a
-        ref(return value) (users must dereference twice to get the actual
-        return value)
+    # run() keeps a Ray remote function alive for the caller so that it can
+    # proxy the request to the pool and the response back to the caller. run()
+    # will stay alive until the entire request is finished.
+    async def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None):
+        """Schedule some work on the pool.
 
         Arguments:
             groupID: Which worker type to use.
             methodName: Method name within the worker to invoke.
-            nReturn: Number of return values for this invocation.
-            args, kwargs: Arguments to pass to the method"""
+            num_returns: Number of return values for this invocation.
+            args, kwargs: Arguments to pass to the method
+
+        Returns:
+            ref(return value) -
+                Since users are calling run() as an actor method, Ray will wrap
+                it in another reference. This means that users actually see
+                ref(ref(return value)) and must dereference twice to get the
+                actual return value
+        """
         if kwargs is None:
             kwargs = {}
 
         resFuture = asyncio.get_running_loop().create_future()
-        req = PoolReq(groupID=groupID, fName=methodName, nReturn=nReturn,
-                      args=args, kwargs=kwargs, resFuture=resFuture)
+        req = PoolReq(groupID=groupID, fName=methodName,
+                      num_returns=num_returns, args=args, kwargs=kwargs,
+                      resFuture=resFuture)
 
         #XXX add code to wait for inputs to be ready
 
         self.newReqQ.put_nowait(req)
         res = await resFuture
-        return res
+
+        # Match the behavior of normal Ray tasks or actors. They will return a
+        # single value for num_returns=1 or an iterable for num_returns >= 1.
+        if num_returns == 1:
+            return res[0]
+        else:
+            return res
 
     async def handleEvent(self):
         """Event handler for worker completions and new requests (via run())."""

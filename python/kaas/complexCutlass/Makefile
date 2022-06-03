@@ -1,4 +1,4 @@
-CUTLASS_PATH ?= ../../../../examples/cutlass/cutlass-src
+CUTLASS_PATH ?= ../../../../cutlass
 
 70FOUND:=$(shell lspci | grep "V100")
 

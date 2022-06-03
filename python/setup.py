@@ -1,5 +1,7 @@
 import setuptools
 import shutil
+import subprocess as sp
+import pathlib
 
 VERSION = '0.0.1'
 
@@ -8,6 +10,10 @@ with open("requirements.txt", "r") as f:
 
 if shutil.which('nvcc') is None:
     install_requires.remove('pycuda')
+else:
+    sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/cutlass', check=True)
+    sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/complexCutlass', check=True)
+sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'test/kerns', check=True)
 
 with open("../README.md", "r") as fh:
     long_description = fh.read()

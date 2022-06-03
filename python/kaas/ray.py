@@ -1,6 +1,7 @@
 # from . import _server_light as _server
 from . import _server_prof as _server
 from . import profiling
+from . import pool
 
 import ray
 
@@ -92,7 +93,7 @@ def invoke(rawReq, stats=None, clientID=None):
 
 
 @ray.remote(num_gpus=1)
-class invokerActor():
+class invokerActor(pool.PoolWorker):
     def __init__(self):
         """invokerActor is the ray version of a kaas worker, it is assigned a
         single GPU and supports requests from multiple clients."""

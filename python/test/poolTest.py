@@ -5,23 +5,51 @@ import kaas.pool
 
 @ray.remote
 class TestWorker(kaas.pool.PoolWorker):
-    def exampleMethod(self, arg):
-        return f"val is {arg}"
+    def returnOne(self, arg):
+        return arg
+
+    def returnTwo(self, arg):
+        return True, arg
 
 
-def minTest(policy):
+def testMultiRet(policy):
     groupID = "exampleGroup"
-    pool = kaas.pool.Pool.remote(3, policy=policy)
-    registerConfirm = pool.registerGroup.remote(groupID, TestWorker)
-    ray.get(registerConfirm)
+    pool = kaas.pool.Pool(3, policy=policy)
+    pool.registerGroup(groupID, TestWorker)
 
     refs = []
     for i in range(3):
-        refs.append(pool.run.remote(groupID, "exampleMethod", 1, args=[i]))
+        refs.append(pool.run(groupID, "returnTwo", num_returns=2, args=[i]))
 
-    expects = ["val is 0", "val is 1", "val is 2"]
-    rets = [ray.get(ray.get(ref))[0] for ref in refs]
-    for expect, ret in zip(expects, rets):
+    # the pool returns a reference to the TestWorker.returnTwo remote method's
+    # return values which should be a tuple of references.
+    retRefs = [ray.get(ref) for ref in refs]
+    for expect, retRef in enumerate(retRefs):
+        success = ray.get(retRef[0])
+        if not isinstance(success, bool) or not success:
+            print("Test Failed: returned wrong first value expected True, got ", success)
+            return False
+
+        val = ray.get(retRef[1])
+        if expect != val:
+            print(f"Test Failed: returned wrong second value expected '{expect}', got '{val}'")
+            return False
+
+    return True
+
+
+def testOneRet(policy):
+    groupID = "exampleGroup"
+    pool = kaas.pool.Pool(3, policy=policy)
+    pool.registerGroup(groupID, TestWorker)
+
+    refs = []
+    for i in range(3):
+        refs.append(pool.run(groupID, "returnOne", args=[i]))
+
+    retRefs = [ray.get(ref) for ref in refs]
+    for expect, retRef in enumerate(retRefs):
+        ret = ray.get(retRef)
         if expect != ret:
             print(f"Test Failed: expected '{expect}', got '{ret}'")
             return False
@@ -32,13 +60,19 @@ def minTest(policy):
 if __name__ == "__main__":
     ray.init()
     print("Min test BalancePolicy")
-    if not minTest(kaas.pool.BalancePolicy):
+    if not testOneRet(kaas.pool.BalancePolicy):
         print("FAIL")
     else:
         print("SUCCESS")
 
     print("Min test ExclusivePolicy")
-    if not minTest(kaas.pool.ExclusivePolicy):
+    if not testOneRet(kaas.pool.ExclusivePolicy):
+        print("FAIL")
+    else:
+        print("SUCCESS")
+
+    print("Multiple Returns")
+    if not testMultiRet(kaas.pool.BalancePolicy):
         print("FAIL")
     else:
         print("SUCCESS")
