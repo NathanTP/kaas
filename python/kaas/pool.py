@@ -427,15 +427,12 @@ class _PoolActor():
         self.idle = asyncio.Event()
         self.idle.set()
 
-        #XXX
-        self.totalNewRuns = 0
-
         if policy is policies.BALANCE:
             self.policy = BalancePolicy(maxWorkers)
         elif policy is policies.EXCLUSIVE:
             self.policy = ExclusivePolicy(maxWorkers)
         else:
-            raise PoolError("Unrecognized policy: ", policy)
+            raise PoolError("Unrecognized policy: " + str(policy))
 
         self.profs = profiling.profCollection()
 
@@ -476,7 +473,6 @@ class _PoolActor():
             kwargs = {}
 
         self.nPendingReqs += 1
-        print("submitting req, pending=", self.nPendingReqs)
         self.idle.clear()
 
         resFuture = asyncio.get_running_loop().create_future()
