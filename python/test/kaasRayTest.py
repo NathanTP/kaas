@@ -114,7 +114,7 @@ def testMinimal():
 def testPool():
     """Test the pool mechanism"""
     groupID = 'testClient'
-    pool = kaas.pool.Pool(1, policy=kaas.pool.BalancePolicy)
+    pool = kaas.pool.Pool(1, policy=kaas.pool.policies.BALANCE)
 
     pool.registerGroup(groupID, kaas.ray.invokerActor)
 
