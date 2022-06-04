@@ -5,10 +5,17 @@ import kaas.pool
 
 @ray.remote
 class TestWorker(kaas.pool.PoolWorker):
+    def __init__(self):
+        # Initialize the PoolWorker parent class to get self.profs
+        super().__init__()
+        self.profs['n_initialized'].increment(1)
+
     def returnOne(self, arg):
+        self.profs['n_returnOne'].increment(1)
         return arg
 
     def returnTwo(self, arg):
+        self.profs['n_returnTwo'].increment(1)
         return True, arg
 
 
@@ -57,22 +64,46 @@ def testOneRet(policy):
     return True
 
 
+def testProfs(policy):
+    pool = kaas.pool.Pool(3, policy=policy)
+
+    groups = ['group0', 'group1']
+    # groups = ['group0']
+    for groupID in groups:
+        pool.registerGroup(groupID, TestWorker)
+        retRefs = []
+        for i in range(5):
+            retRefs.append(ray.get(pool.run(groupID, 'returnOne', args=['testInp'])))
+
+        ray.get(retRefs)
+
+    profs = pool.getProfile()
+    report = profs.report()
+    if not set(groups) <= set(report.keys()):
+        print("Failure: missing groups")
+
+    return True
+
+
 if __name__ == "__main__":
     ray.init()
-    print("Min test BalancePolicy")
-    if not testOneRet(kaas.pool.BalancePolicy):
-        print("FAIL")
-    else:
-        print("SUCCESS")
 
-    print("Min test ExclusivePolicy")
-    if not testOneRet(kaas.pool.ExclusivePolicy):
-        print("FAIL")
-    else:
-        print("SUCCESS")
-
-    print("Multiple Returns")
-    if not testMultiRet(kaas.pool.BalancePolicy):
-        print("FAIL")
-    else:
-        print("SUCCESS")
+    testProfs(kaas.pool.policies.EXCLUSIVE)
+    # testProfs(kaas.pool.policies.BALANCE)
+    # print("Min test BalancePolicy")
+    # if not testOneRet(kaas.pool.BalancePolicy):
+    #     print("FAIL")
+    # else:
+    #     print("SUCCESS")
+    #
+    # print("Min test ExclusivePolicy")
+    # if not testOneRet(kaas.pool.ExclusivePolicy):
+    #     print("FAIL")
+    # else:
+    #     print("SUCCESS")
+    #
+    # print("Multiple Returns")
+    # if not testMultiRet(kaas.pool.BalancePolicy):
+    #     print("FAIL")
+    # else:
+    #     print("SUCCESS")

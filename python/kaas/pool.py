@@ -4,9 +4,30 @@ from tornado.ioloop import IOLoop
 import asyncio
 import collections
 import abc
+import enum
+from . import profiling
 
 
 PoolReq = collections.namedtuple('PoolReq', ['groupID', 'fName', 'num_returns', 'args', 'kwargs', 'resFuture'])
+
+
+metrics = [
+    "t_policy_run"  # Time from receiving the request until the worker is invoked
+]
+
+
+# Policy name constants
+class policies(enum.Enum):
+    BALANCE = enum.auto()
+    EXCLUSIVE = enum.auto()
+
+
+def mergePerGroupStats(base, delta):
+    for cID, deltaClient in delta.items():
+        if cID in base:
+            base[cID].merge(deltaClient)
+        else:
+            base[cID] = deltaClient
 
 
 class PoolError(Exception):
@@ -18,7 +39,12 @@ class PoolError(Exception):
 
 
 class PoolWorker():
-    """Inherit from this to make your class compatible with Pools."""
+    """Inherit from this to make your class compatible with Pools.
+    To include profiling data with your worker, you should call
+    super().__init__ and use the provided self.profs variable."""
+    def __init__(self):
+        self.profs = profiling.profCollection()
+
     def _runWithCompletion(self, fName, args, kwargs):
         """Wraps the method 'fname' with a completion signal as required by
         Pools"""
@@ -27,6 +53,15 @@ class PoolWorker():
             rets = (rets,)
 
         return (True, *rets)
+
+    def _getProfile(self):
+        # Users are not required to initialize profiling
+        if self.profs is None:
+            return profiling.profCollection()
+        else:
+            latestProfs = self.profs
+            self.profs = profiling.profCollection()
+            return latestProfs
 
 
 class Policy(abc.ABC):
@@ -67,6 +102,11 @@ class Policy(abc.ABC):
         """
         pass
 
+    @abc.abstractmethod
+    def getProfile(self) -> profiling.profCollection:
+        """Return any collected profiling data and reset profiling"""
+        pass
+
 
 class BalancePolicy(Policy):
     def __init__(self, maxWorkers):
@@ -80,6 +120,11 @@ class BalancePolicy(Policy):
         self.workerClass = None
         self.nextWID = 0
 
+        self.profs = profiling.profCollection()
+
+        # References to profiling data from killed workers
+        self.pendingProfs = []
+
         # {workerID: worker actor handle}
         self.freeWorkers = {}  # ready to recieve a request
         self.busyWorkers = {}  # currently running a request
@@ -91,6 +136,7 @@ class BalancePolicy(Policy):
         """Change the target number of workers."""
         delta = newMax - self.maxWorkers
         if delta > 0:
+            self.profs['n_cold_start'].increment(delta)
             # scale up
             for i in range(delta):
                 self.freeWorkers[self.nextWID] = self.workerClass.remote()
@@ -98,16 +144,19 @@ class BalancePolicy(Policy):
 
         elif delta < 0:
             # Scale down
+            self.profs['n_killed'].increment(-delta)
 
             # try free workers first
             while len(self.freeWorkers) > 0 and delta > 0:
                 _, toKill = self.freeWorkers.popitem()
+                self.pendingProfs.append(toKill._getProfile.remote())
                 toKill.terminate.remote()
                 delta -= 1
 
             # next take from busy pool
             while delta > 0:
                 wID, toKill = self.busyWorkers.popitem()
+                self.pendingProfs.append(toKill._getProfile.remote())
                 toKill.terminate.remote()
                 self.deadWorkers[wID] = toKill
                 delta -= 1
@@ -123,19 +172,19 @@ class BalancePolicy(Policy):
         as the first worker type is registered and never messes with them
         again. It does not distinguish between groupIDs because there will
         only ever be one worker class."""
-        if self.workerClass is not None:
-            raise PoolError("The BalancePolicy does not support multiple worker types")
-        else:
+        if self.workerClass is None:
             self.workerClass = workerClass
+        elif self.workerClass.__class__ != workerClass.__class__:
+            raise PoolError("The BalancePolicy does not support multiple worker types")
 
-        # This should only happen on the first group registration
+        # This should only happen on the first group registration. scale()
+        # expects the max to have changed so we trick it by seting maxWorkers
+        # to 0 before scaling.
         if self.numWorkers != self.maxWorkers:
             assert self.numWorkers == 0
-            for i in range(self.maxWorkers):
-                self.freeWorkers[self.nextWID] = self.workerClass.remote()
-                self.nextWID += 1
-
-            self.numWorkers = self.maxWorkers
+            realMax = self.maxWorkers
+            self.maxWorkers = 0
+            self.scale(realMax)
 
     def update(self, reqs=(), completedWorkers=()):
         if self.workerClass is None:
@@ -144,14 +193,14 @@ class BalancePolicy(Policy):
         if self.maxWorkers == 0:
             raise PoolError("Requested worker but maxWorkers==0")
 
-        # Update internal state
-        self.pendingReqs += reqs
         for wID in completedWorkers:
             doneWorker = self.busyWorkers.pop(wID, None)
             if doneWorker is not None:
                 self.freeWorkers[wID] = doneWorker
             else:
                 del self.deadWorkers[wID]
+
+        self.pendingReqs += reqs
 
         toSchedule = []
         for i in range(min(len(self.freeWorkers), len(self.pendingReqs))):
@@ -162,10 +211,8 @@ class BalancePolicy(Policy):
             wID, worker = self.freeWorkers.popitem()
             self.busyWorkers[wID] = worker
 
-            #XXX
-            nReturns = req.num_returns + 1
             resRefs = worker._runWithCompletion.options(
-                num_returns=nReturns).remote(
+                num_returns=req.num_returns + 1).remote(
                 req.fName, req.args, req.kwargs)
 
             req.resFuture.set_result(resRefs[1:])
@@ -174,11 +221,31 @@ class BalancePolicy(Policy):
 
         return newRuns
 
+    async def getProfile(self):
+        if len(self.busyWorkers) != 0:
+            raise PoolError("Cannot call getProfile() when there are pending requests")
+
+        for worker in self.freeWorkers.values():
+            self.pendingProfs.append(worker._getProfile.remote())
+
+        workerStats = await asyncio.gather(*self.pendingProfs)
+        self.pendingProfs = []
+
+        latestProfs = self.profs
+        self.profs = profiling.profCollection()
+
+        for workerStat in workerStats:
+            latestProfs.merge(workerStat)
+
+        return latestProfs
+
 
 class ExclusivePolicy(Policy):
     def __init__(self, maxWorkers):
         self.maxWorkers = maxWorkers
         self.numWorkers = 0
+
+        self.profs = profiling.profCollection()
 
         # {groupID: BalancePolicy}
         self.groups = {}
@@ -198,10 +265,15 @@ class ExclusivePolicy(Policy):
         elif self.numWorkers < self.maxWorkers:
             # free to scale
             reqGroup.scale(reqGroup.numWorkers + 1)
+            self.numWorkers += 1
         else:
             # Gonna have to consider shrinking someone
             victimID = None
             maxSize = 0
+
+            # Find the group with the most workers. Break ties by order in
+            # dictionary which will be maintained in order of least-recently
+            # evicted.
             for candidateID, candidate in self.groups.items():
                 if candidate.numWorkers > maxSize:
                     victimID = candidateID
@@ -212,7 +284,7 @@ class ExclusivePolicy(Policy):
                 # ensure that the same victim doesn't get repeated scaled
                 # down when there are multiple max-sized candidates
                 # (dictionaries maintain insertion order)
-                victim = self.groups.popitem(victimID)
+                victim = self.groups.pop(victimID)
                 victim.scale(victim.numWorkers - 1)
                 self.groups[victimID] = victim
 
@@ -231,20 +303,34 @@ class ExclusivePolicy(Policy):
             else:
                 groupCompletions[gID].append(wID)
 
+        # {gID: {fut: wID}}
+        groupRuns = collections.defaultdict(dict)
+
         # Update all the groups with completions so that they have the most
         # up-to-date state in case we have to scale
         for gID, completions in groupCompletions.items():
-            self.groups[gID].update(completedWorkers=completions)
+            groupRuns[gID] = self.groups[gID].update(completedWorkers=completions)
+
+        for req in reqs:
+            groupRuns[req.groupID] |= self.handleReq(req)
 
         newRuns = {}
-        for req in reqs:
-            # If there were some unhandled requests piled up, the group might
-            # return multiple new runs
-            groupRuns = self.handleReq(req)
-            for fut, wID in groupRuns.items():
-                newRuns[fut] = (req.groupID, wID)
+        for gID, runs in groupRuns.items():
+            for fut, wID in runs.items():
+                newRuns[fut] = (gID, wID)
 
         return newRuns
+
+    async def getProfile(self):
+        latestProfs = self.profs
+        self.profs = profiling.profCollection()
+
+        groupProfs = await asyncio.gather(*[group.getProfile() for group in self.groups.values()])
+
+        for groupID, groupProf in zip(self.groups.keys(), groupProfs):
+            latestProfs.mod(groupID).merge(groupProf)
+
+        return latestProfs
 
 
 class Pool():
@@ -267,10 +353,10 @@ class Pool():
         types and other fairness properties.
     """
 
-    def __init__(self, maxWorkers, policy: Policy = BalancePolicy, nGPUs=0):
+    def __init__(self, maxWorkers, policy=policies.BALANCE, nGPUs=0):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
-            policy: Scheduling policy class to use
+            policy: Scheduling policy class to use (from policies enum)
             nGPUs: Number of GPUs to assign to each worker. Pool does not
                    currently support per-group nGPUs.
         """
@@ -308,6 +394,16 @@ class Pool():
         """
         return self.pool.run.remote(groupID, methodName, num_returns=num_returns, args=args, kwargs=kwargs)
 
+    def getProfile(self) -> profiling.profCollection:
+        """Returns any profiling data collected so far in this pool and resets
+        the profiler. The profile will have one module per registered group as
+        well as pool-wide metrics.
+
+        WARNING: The caller must ensure that there is no pending work on the
+        pool before calling getProfile(). Calling getProfile() while there are
+        outstanding requests will result in undefined behavior."""
+        return ray.get(self.pool.getProfile.remote())
+
 
 @ray.remote
 class _PoolActor():
@@ -316,7 +412,7 @@ class _PoolActor():
     completions via a "Done" reference. For each event, the Pool updates the
     Policy which handles the actual pool management and worker invocation."""
 
-    def __init__(self, maxWorkers, policy: Policy = BalancePolicy, nGPUs=0):
+    def __init__(self, maxWorkers, policy, nGPUs=0):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
             policy: Scheduling policy class to use
@@ -327,7 +423,21 @@ class _PoolActor():
         self.newReqQ = asyncio.Queue()
         self.pendingTasks = set()
 
-        self.policy = policy(maxWorkers)
+        self.nPendingReqs = 0
+        self.idle = asyncio.Event()
+        self.idle.set()
+
+        #XXX
+        self.totalNewRuns = 0
+
+        if policy is policies.BALANCE:
+            self.policy = BalancePolicy(maxWorkers)
+        elif policy is policies.EXCLUSIVE:
+            self.policy = ExclusivePolicy(maxWorkers)
+        else:
+            raise PoolError("Unrecognized policy: ", policy)
+
+        self.profs = profiling.profCollection()
 
         # {doneFut: wID}
         self.pendingRuns = {}
@@ -341,6 +451,7 @@ class _PoolActor():
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run()."""
         self.policy.registerGroup(groupID, workerClass)
+        self.profs.mod(groupID)
 
     # run() keeps a Ray remote function alive for the caller so that it can
     # proxy the request to the pool and the response back to the caller. run()
@@ -364,15 +475,21 @@ class _PoolActor():
         if kwargs is None:
             kwargs = {}
 
+        self.nPendingReqs += 1
+        print("submitting req, pending=", self.nPendingReqs)
+        self.idle.clear()
+
         resFuture = asyncio.get_running_loop().create_future()
         req = PoolReq(groupID=groupID, fName=methodName,
                       num_returns=num_returns, args=args, kwargs=kwargs,
                       resFuture=resFuture)
 
-        #XXX add code to wait for inputs to be ready
+        with profiling.timer('t_policy_run', self.profs.mod(groupID)):
+            #XXX add code to wait for inputs to be ready
+            self.newReqQ.put_nowait(req)
+            res = await resFuture
 
-        self.newReqQ.put_nowait(req)
-        res = await resFuture
+        #XXX wait for worker to finish?
 
         # Match the behavior of normal Ray tasks or actors. They will return a
         # single value for num_returns=1 or an iterable for num_returns >= 1.
@@ -402,4 +519,18 @@ class _PoolActor():
         self.pendingRuns |= newRuns
         self.pendingTasks |= newRuns.keys()
 
+        self.nPendingReqs -= len(doneWorkers)
+        if self.nPendingReqs == 0:
+            self.idle.set()
+
         self.loop.add_callback(self.handleEvent)
+
+    async def getProfile(self) -> profiling.profCollection:
+        await self.idle.wait()
+
+        latestProfs = self.profs
+        self.profs = profiling.profCollection()
+
+        latestProfs.merge(await self.policy.getProfile())
+
+        return latestProfs

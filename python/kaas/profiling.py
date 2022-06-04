@@ -133,20 +133,20 @@ class profCollection(collections.abc.MutableMapping):
     def report(self, includeEvents=False):
         """Create a report dctionary from this collection of the form
         {metricName: metricReport} where metricReport is returned by
-        prof.report(). See prof.report() for details of the contents of each
+        prof.report(). If there are modules, they will be sub-dictionaries in
+        the report. See prof.report() for details of the contents of each
         metricReport, including the behavior of includeEvents."""
-
-        flattened = {}
+        report = {}
         for name, v in self.profs.items():
             try:
-                flattened[name] = v.report(includeEvents=includeEvents)
+                report[name] = v.report(includeEvents=includeEvents)
             except Exception as e:
                 raise RuntimeError(f"Failed to report metric '{name}'") from e
 
         for name, mod in self.mods.items():
-            flattened = {**flattened, **{name+":"+itemName: v for itemName, v in mod.report(includeEvents=includeEvents).items()}}
+            report[name] = mod.report(includeEvents=includeEvents)
 
-        return flattened
+        return report
 
     def reset(self):
         """Clears all existing metrics. Any instantiated modules will continue
