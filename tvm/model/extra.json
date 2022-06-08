@@ -1,0 +1,31 @@
+{
+ "inputs": [
+  {
+   "name": "input_tensor:0",
+   "type": "float32",
+   "shape": [
+    1,
+    3,
+    224,
+    224
+   ]
+  }
+ ],
+ "outputs": [
+  {
+   "name": "ArgMax:0",
+   "type": "int64",
+   "shape": [
+    0
+   ]
+  },
+  {
+   "name": "softmax_tensor:0",
+   "type": "float32",
+   "shape": [
+    0,
+    1001
+   ]
+  }
+ ]
+}

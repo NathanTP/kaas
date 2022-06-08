@@ -1,0 +1,46 @@
+{
+ "inputs": [
+  {
+   "name": "input_ids",
+   "type": "int64",
+   "shape": [
+    1,
+    384
+   ]
+  },
+  {
+   "name": "input_mask",
+   "type": "int64",
+   "shape": [
+    1,
+    384
+   ]
+  },
+  {
+   "name": "segment_ids",
+   "type": "int64",
+   "shape": [
+    1,
+    384
+   ]
+  }
+ ],
+ "outputs": [
+  {
+   "name": "output_start_logits",
+   "type": "float32",
+   "shape": [
+    0,
+    384
+   ]
+  },
+  {
+   "name": "output_end_logits",
+   "type": "float32",
+   "shape": [
+    0,
+    384
+   ]
+  }
+ ]
+}

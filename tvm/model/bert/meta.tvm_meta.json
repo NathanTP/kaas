@@ -1,0 +1,385 @@
+{
+  "tvm_version": "0.1.0", 
+  "func_info": {
+    "fused_subtract_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_batch_matmul_1_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_expand_dims_expand_dims_cast_subtract_multiply_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_add_sqrt_divide_multiply_add_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_divide_reshape_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_mean_kernel1": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_power_mean_kernel1": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_transpose_reshape_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_batch_matmul_2_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_add_reshape_transpose_reshape_transpose_1_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_power_mean_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_squeeze_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_less_add_where_take_add_less_add_where_take_add_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_subtract_exp_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_add_sqrt_divide_multiply_add_reshape_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_add_reshape_transpose_reshape_transpose_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_batch_matmul_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_squeeze_1_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_add_multiply_divide_erf_add_multiply_reshape_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_add_add_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_add_reshape_transpose_reshape_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_max_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_mean_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_batch_matmul_3_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_batch_matmul_4_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_add_split_kernel1": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_divide_add_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_sum_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_batch_matmul_5_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_add_split_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }
+  }
+}

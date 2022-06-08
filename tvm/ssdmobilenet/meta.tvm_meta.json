@@ -1,0 +1,1532 @@
+{
+  "tvm_version": "0.1.0", 
+  "func_info": {
+    "fused_nn_conv2d_add_nn_relu_21_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_5_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_12_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_7_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_transpose_nn_batch_flatten_transpose_nn_batch_flatten_transpose_nn_batch_f_8810502739128911189__kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_6_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_2_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel5": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.y", 
+        "threadIdx.x", 
+        "blockIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_8_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_cast_zeros_where_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_4_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_10_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_20_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_6_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_23_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_get_valid_counts_kernel4": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "int32"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y"
+      ]
+    }, 
+    "fused_nn_conv2d_add_5_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_9_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_get_valid_counts_kernel6": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y"
+      ]
+    }, 
+    "fused_cast_zeros_add_ones_multiply_where_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_softmax_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_5_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_28_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel2": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y", 
+        "blockIdx.z"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_19_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_14_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_softmax_kernel2": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_26_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_9_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_13_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_get_valid_counts_kernel2": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "int32"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_11_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_4_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_6_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_3_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel4": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y", 
+        "blockIdx.z"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel1": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y", 
+        "blockIdx.z"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_8_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel6": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_7_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_2_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_22_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_get_valid_counts_kernel5": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_13_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_12_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_15_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel7": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_15_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel3": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "int32"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y", 
+        "blockIdx.z"
+      ]
+    }, 
+    "fused_nn_softmax_kernel1": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_3_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_softmax_kernel3": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_10_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_non_max_suppression_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_24_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_9_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_get_valid_counts_kernel1": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y"
+      ]
+    }, 
+    "fused_vision_get_valid_counts_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "threadIdx.x", 
+        "blockIdx.x", 
+        "blockIdx.y"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_11_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_7_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_27_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_4_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_strided_slice_strided_slice_concat_13889001601585811865__kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_3_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_1_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_1_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_vision_get_valid_counts_kernel3": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_12_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_16_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_2_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_25_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_greater_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_4_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_10_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_14_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_11_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_17_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_3_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_18_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_transpose_nn_batch_flatten_transpose_nn_batch_flatten_transpose_nn_batch_f_17714381892351096550__kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_8_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_16_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_strided_slice_strided_slice_concatenate_2_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_1_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }
+  }
+}

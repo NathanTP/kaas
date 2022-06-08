@@ -1,0 +1,130 @@
+{
+  "tvm_version": "0.1.0", 
+  "func_info": {
+    "fused_nn_conv2d_add_4_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_13_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_reshape_transpose_reshape_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_4_kernel1": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_4_kernel2": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_4_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.x", 
+        "threadIdx.x"
+      ]
+    }, 
+    "fused_nn_conv2d_add_nn_relu_12_kernel0": {
+      "name": "", 
+      "arg_types": [
+        "handle", 
+        "handle", 
+        "handle", 
+        "handle"
+      ], 
+      "thread_axis_tags": [
+        "blockIdx.z", 
+        "blockIdx.y", 
+        "blockIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x", 
+        "threadIdx.z", 
+        "threadIdx.y", 
+        "threadIdx.x"
+      ]
+    }
+  }
+}
