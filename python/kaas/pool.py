@@ -45,7 +45,9 @@ class PoolWorker():
     def __init__(self):
         self.profs = profiling.profCollection()
 
-    def _runWithCompletion(self, fName, args, kwargs):
+    # Note: args and kwargs are passed directly (rather than in a list/dict)
+    # because they may contain references that Ray would need to manage.
+    def _runWithCompletion(self, fName, *args, **kwargs):
         """Wraps the method 'fname' with a completion signal as required by
         Pools"""
         rets = getattr(self, fName)(*args, **kwargs)
@@ -213,7 +215,7 @@ class BalancePolicy(Policy):
 
             resRefs = worker._runWithCompletion.options(
                 num_returns=req.num_returns + 1).remote(
-                req.fName, req.args, req.kwargs)
+                req.fName, *req.args, **req.kwargs)
 
             req.resFuture.set_result(resRefs[1:])
             doneFut = asyncio.wrap_future(resRefs[1].future())
