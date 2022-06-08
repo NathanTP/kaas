@@ -5,15 +5,20 @@ import asyncio
 import collections
 import abc
 import enum
+import concurrent
 from . import profiling
 
 
 PoolReq = collections.namedtuple('PoolReq', ['groupID', 'fName', 'num_returns', 'args', 'kwargs', 'resFuture'])
 
-
 metrics = [
     "t_policy_run"  # Time from receiving the request until the worker is invoked
 ]
+
+# When using the threadpool-based waiter, this is the number of waiter threads
+# to use. It's a tradeoff between Python overheads and maximum number of
+# outstanding requests.
+N_WAIT_THREADS = 32
 
 
 # Policy name constants
@@ -376,7 +381,7 @@ class Pool():
         must be waited on before sending requests for this group."""
         return self.pool.registerGroup.remote(groupID, workerClass)
 
-    def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None):
+    def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None, refDeps=None):
         """Schedule some work on the pool.
 
         Arguments:
@@ -394,7 +399,8 @@ class Pool():
                 need to dereference twice: once to get the worker return
                 reference(s), and again to get the value of those return(s).
         """
-        return self.pool.run.remote(groupID, methodName, num_returns=num_returns, args=args, kwargs=kwargs)
+        return self.pool.run.remote(groupID, methodName, num_returns=num_returns,
+                                    args=args, kwargs=kwargs, refDeps=refDeps)
 
     def getProfile(self) -> profiling.profCollection:
         """Returns any profiling data collected so far in this pool and resets
@@ -429,6 +435,9 @@ class _PoolActor():
         self.idle = asyncio.Event()
         self.idle.set()
 
+        self.asyncioLoop = asyncio.get_running_loop()
+        self.threadPool = concurrent.futures.ThreadPoolExecutor(max_workers=N_WAIT_THREADS)
+
         if policy is policies.BALANCE:
             self.policy = BalancePolicy(maxWorkers)
         elif policy is policies.EXCLUSIVE:
@@ -446,6 +455,21 @@ class _PoolActor():
 
         self.loop.add_callback(self.handleEvent)
 
+    # This one uses a thread pool. It avoids materializing the refs, but it can
+    # only handle a limited number of outstanding requests. Scaling up the
+    # number of threads can have an adverse impact on overall performance.
+    async def _waitRefs(self, refs):
+        await self.asyncioLoop. \
+            run_in_executor(self.threadPool,
+                            lambda: ray.wait(refs, fetch_local=False))
+
+    # This one uses normal asyncio.wait but it materializes the references
+    # which could be slow and wasteful depending on what the references point
+    # to. Ideally, we would have a fetch_local=False option for ray futures,
+    # but that is WIP: https://github.com/ray-project/ray/issues/25415
+    # async def _waitRefs(self, refs):
+    #     await asyncio.wait(refs, return_when=asyncio.ALL_COMPLETED)
+
     async def registerGroup(self, groupID, workerClass: PoolWorker):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run()."""
@@ -455,14 +479,22 @@ class _PoolActor():
     # run() keeps a Ray remote function alive for the caller so that it can
     # proxy the request to the pool and the response back to the caller. run()
     # will stay alive until the entire request is finished.
-    async def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None):
+    async def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None, refDeps=None):
         """Schedule some work on the pool.
 
         Arguments:
             groupID: Which worker type to use.
-            methodName: Method name within the worker to invoke.
-            num_returns: Number of return values for this invocation.
-            args, kwargs: Arguments to pass to the method
+            methodName:
+                Method name within the worker to invoke.
+            num_returns:
+                Number of return values for this invocation.
+            args, kwargs:
+                Arguments to pass to the method
+            refDeps:
+                list of references to wait for before submitting the function
+                to the pool. This field is not required, but it can result in
+                much better utilization by preventing upstream dependencies
+                from blocking workers.
 
         Returns:
             ref(return value) -
@@ -482,12 +514,12 @@ class _PoolActor():
                       num_returns=num_returns, args=args, kwargs=kwargs,
                       resFuture=resFuture)
 
+        if refDeps is not None:
+            await self._waitRefs(refDeps)
+
         with profiling.timer('t_policy_run', self.profs.mod(groupID)):
-            #XXX add code to wait for inputs to be ready
             self.newReqQ.put_nowait(req)
             res = await resFuture
-
-        #XXX wait for worker to finish?
 
         # Match the behavior of normal Ray tasks or actors. They will return a
         # single value for num_returns=1 or an iterable for num_returns >= 1.

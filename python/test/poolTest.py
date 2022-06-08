@@ -54,9 +54,11 @@ def testOneRet(policy, inputRef=False):
     for i in range(3):
         if inputRef:
             arg = ray.put(i)
+            refDeps = [arg]
         else:
             arg = i
-        refs.append(pool.run(groupID, "returnOne", args=[arg]))
+            refDeps = None
+        refs.append(pool.run(groupID, "returnOne", args=[arg], refDeps=refDeps))
 
     retRefs = [ray.get(ref) for ref in refs]
     for expect, retRef in enumerate(retRefs):
@@ -92,32 +94,32 @@ def testProfs(policy):
 if __name__ == "__main__":
     ray.init()
 
-    # print("Single Return BalancePolicy")
-    # if not testOneRet(kaas.pool.policies.BALANCE):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
+    print("Single Return BalancePolicy")
+    if not testOneRet(kaas.pool.policies.BALANCE):
+        print("FAIL")
+    else:
+        print("SUCCESS")
 
-    # print("Reference Argument BalancePolicy")
-    # if not testOneRet(kaas.pool.policies.BALANCE, inputRef=True):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
-    #
-    # print("Min test ExclusivePolicy")
-    # if not testOneRet(kaas.pool.policies.EXCLUSIVE):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
-    #
+    print("Reference Argument BalancePolicy")
+    if not testOneRet(kaas.pool.policies.BALANCE, inputRef=True):
+        print("FAIL")
+    else:
+        print("SUCCESS")
+
+    print("Min test ExclusivePolicy")
+    if not testOneRet(kaas.pool.policies.EXCLUSIVE):
+        print("FAIL")
+    else:
+        print("SUCCESS")
+
     print("Multiple Returns")
     if not testMultiRet(kaas.pool.policies.BALANCE):
         print("FAIL")
     else:
         print("SUCCESS")
-    #
-    # print("Profiling Test")
-    # if not testProfs(kaas.pool.policies.EXCLUSIVE):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
+
+    print("Profiling Test")
+    if not testProfs(kaas.pool.policies.EXCLUSIVE):
+        print("FAIL")
+    else:
+        print("SUCCESS")
