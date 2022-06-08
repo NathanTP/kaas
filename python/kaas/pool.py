@@ -17,7 +17,7 @@ metrics = [
 
 
 # Policy name constants
-class policies(enum.Enum):
+class policies(enum.IntEnum):
     BALANCE = enum.auto()
     EXCLUSIVE = enum.auto()
 
