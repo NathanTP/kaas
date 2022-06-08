@@ -134,7 +134,7 @@ def testPool():
     if not checkDot(resArray[0], inputArrs[0], inputArrs[1]):
         return False
 
-    profs = pool.getProfile().report()
+    profs = pool.getProfile().report(metrics=['mean'])
     if 'testClient' not in profs or 't_invoke' not in profs['testClient']:
         print("Profile missing data:")
         print(profs)
