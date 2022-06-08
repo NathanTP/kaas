@@ -40,7 +40,7 @@ class PoolError(Exception):
         self.msg = msg
 
     def __str__(self):
-        return "Pool Error: " + self.msg
+        return self.msg
 
 
 class PoolWorker():
@@ -63,12 +63,15 @@ class PoolWorker():
 
     def _getProfile(self):
         # Users are not required to initialize profiling
-        if self.profs is None:
-            return profiling.profCollection()
-        else:
-            latestProfs = self.profs
-            self.profs = profiling.profCollection()
-            return latestProfs
+        try:
+            if self.profs is None:
+                return profiling.profCollection()
+            else:
+                latestProfs = self.profs
+                self.profs = profiling.profCollection()
+                return latestProfs
+        except AttributeError:
+            raise PoolError("PoolWorkers must call super().__init__() in order to use profiling")
 
 
 class Policy(abc.ABC):

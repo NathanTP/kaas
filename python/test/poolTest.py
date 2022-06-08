@@ -83,10 +83,10 @@ def testProfs(policy):
 
         ray.get(retRefs)
 
-    profs = pool.getProfile()
-    report = profs.report()
-    if not set(groups) <= set(report.keys()):
+    profs = pool.getProfile().report()
+    if not set(groups) <= set(profs.keys()):
         print("Failure: missing groups")
+        return False
 
     return True
 

@@ -131,14 +131,23 @@ def testPool():
     resArray = ray.get(kaasResRef)
     resArray.dtype = np.uint32
 
-    return checkDot(resArray[0], inputArrs[0], inputArrs[1])
+    if not checkDot(resArray[0], inputArrs[0], inputArrs[1]):
+        return False
+
+    profs = pool.getProfile().report()
+    if 'testClient' not in profs or 't_invoke' not in profs['testClient']:
+        print("Profile missing data:")
+        print(profs)
+        return False
+
+    return True
 
 
 if __name__ == "__main__":
     ray.init()
 
-    print("Minimal test")
-    testMinimal()
+    # print("Minimal test")
+    # testMinimal()
 
     print("Pool Test")
     testPool()

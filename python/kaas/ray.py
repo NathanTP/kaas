@@ -100,6 +100,7 @@ class invokerActor(pool.PoolWorker):
     def __init__(self):
         """invokerActor is the ray version of a kaas worker, it is assigned a
         single GPU and supports requests from multiple clients."""
+        super().__init__()
         init()
 
         # {clientID -> profiling.profCollection}
@@ -114,11 +115,12 @@ class invokerActor(pool.PoolWorker):
         """Invoke the kaasReq req on this actor. You may optionally pass a
         clientID. clientIDs are used for per-client profiling and may affect
         scheduling/caching policies."""
-        if clientID not in self.stats:
-            self.stats[clientID] = profiling.profCollection()
+        # if clientID not in self.stats:
+        #     self.stats[clientID] = profiling.profCollection()
 
-        with profiling.timer('t_e2e', self.stats[clientID]):
-            res = invoke(req, self.stats[clientID])
+        clientProfs = self.profs.mod(clientID)
+        with profiling.timer('t_e2e', clientProfs):
+            res = invoke(req, clientProfs)
 
         return res
 
