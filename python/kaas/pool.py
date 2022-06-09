@@ -27,14 +27,6 @@ class policies(enum.IntEnum):
     EXCLUSIVE = enum.auto()
 
 
-def mergePerGroupStats(base, delta):
-    for cID, deltaClient in delta.items():
-        if cID in base:
-            base[cID].merge(deltaClient)
-        else:
-            base[cID] = deltaClient
-
-
 class PoolError(Exception):
     def __init__(self, msg):
         self.msg = msg
@@ -47,8 +39,9 @@ class PoolWorker():
     """Inherit from this to make your class compatible with Pools.
     To include profiling data with your worker, you should call
     super().__init__ and use the provided self.profs variable."""
-    def __init__(self):
-        self.profs = profiling.profCollection()
+    def __init__(self, profLevel=0):
+        self.profLevel = profLevel
+        self.profs = createProfiler(level=self.profLevel)
 
     # Note: args and kwargs are passed directly (rather than in a list/dict)
     # because they may contain references that Ray would need to manage.
@@ -65,10 +58,10 @@ class PoolWorker():
         # Users are not required to initialize profiling
         try:
             if self.profs is None:
-                return profiling.profCollection()
+                return self._createProfiler()
             else:
                 latestProfs = self.profs
-                self.profs = profiling.profCollection()
+                self.profs = createProfiler(level=self.profLevel)
                 return latestProfs
         except AttributeError:
             raise PoolError("PoolWorkers must call super().__init__() in order to use profiling")
@@ -79,7 +72,7 @@ class Policy(abc.ABC):
     the core scheduling algorithm."""
 
     @abc.abstractmethod
-    def __init__(self, numWorker):
+    def __init__(self, numWorker, profLevel=0):
         """Args:
                numWorker: Maximum number of concurrent workers to spawn
         """
@@ -119,7 +112,7 @@ class Policy(abc.ABC):
 
 
 class BalancePolicy(Policy):
-    def __init__(self, maxWorkers):
+    def __init__(self, maxWorkers, profLevel=0):
         """The BalancePolicy balances requests across workers with no affinity
         or isolation between clients. Multiple clients may be registerd, but
         they must all use the same worker class.
@@ -130,7 +123,8 @@ class BalancePolicy(Policy):
         self.workerClass = None
         self.nextWID = 0
 
-        self.profs = profiling.profCollection()
+        self.profLevel = profLevel
+        self.profs = createProfiler(self.profLevel)
 
         # References to profiling data from killed workers
         self.pendingProfs = []
@@ -149,7 +143,7 @@ class BalancePolicy(Policy):
             self.profs['n_cold_start'].increment(delta)
             # scale up
             for i in range(delta):
-                self.freeWorkers[self.nextWID] = self.workerClass.remote()
+                self.freeWorkers[self.nextWID] = self.workerClass.remote(profLevel=self.profLevel)
                 self.nextWID += 1
 
         elif delta < 0:
@@ -242,7 +236,7 @@ class BalancePolicy(Policy):
         self.pendingProfs = []
 
         latestProfs = self.profs
-        self.profs = profiling.profCollection()
+        self.profs = createProfiler(level=self.profLevel)
 
         for workerStat in workerStats:
             latestProfs.merge(workerStat)
@@ -251,11 +245,12 @@ class BalancePolicy(Policy):
 
 
 class ExclusivePolicy(Policy):
-    def __init__(self, maxWorkers):
+    def __init__(self, maxWorkers, profLevel=0):
         self.maxWorkers = maxWorkers
         self.numWorkers = 0
 
-        self.profs = profiling.profCollection()
+        self.profLevel = profLevel
+        self.profs = createProfiler(level=self.profLevel)
 
         # {groupID: BalancePolicy}
         self.groups = {}
@@ -333,7 +328,7 @@ class ExclusivePolicy(Policy):
 
     async def getProfile(self):
         latestProfs = self.profs
-        self.profs = profiling.profCollection()
+        self.profs = createProfiler(level=self.profLevel)
 
         groupProfs = await asyncio.gather(*[group.getProfile() for group in self.groups.values()])
 
@@ -363,14 +358,14 @@ class Pool():
         types and other fairness properties.
     """
 
-    def __init__(self, maxWorkers, policy=policies.BALANCE, nGPUs=0):
+    def __init__(self, maxWorkers, policy=policies.BALANCE, nGPUs=0, profLevel=0):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
             policy: Scheduling policy class to use (from policies enum)
             nGPUs: Number of GPUs to assign to each worker. Pool does not
                    currently support per-group nGPUs.
         """
-        self.pool = _PoolActor.remote(maxWorkers, policy=policy, nGPUs=nGPUs)
+        self.pool = _PoolActor.remote(maxWorkers, policy=policy, nGPUs=nGPUs, profLevel=profLevel)
 
     def registerGroup(self, groupID, workerClass: PoolWorker):
         """Register a new group of workers with this pool. Users must register
@@ -423,13 +418,14 @@ class _PoolActor():
     completions via a "Done" reference. For each event, the Pool updates the
     Policy which handles the actual pool management and worker invocation."""
 
-    def __init__(self, maxWorkers, policy, nGPUs=0):
+    def __init__(self, maxWorkers, policy, nGPUs=0, profLevel=0):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
             policy: Scheduling policy class to use
             nGPUs: Number of GPUs to assign to each worker. Pool does not
                    currently support per-group nGPUs.
         """
+        self.profLevel = profLevel
         self.loop = IOLoop.instance()
         self.newReqQ = asyncio.Queue()
         self.pendingTasks = set()
@@ -442,13 +438,13 @@ class _PoolActor():
         self.threadPool = concurrent.futures.ThreadPoolExecutor(max_workers=N_WAIT_THREADS)
 
         if policy is policies.BALANCE:
-            self.policy = BalancePolicy(maxWorkers)
+            self.policy = BalancePolicy(maxWorkers, profLevel=profLevel)
         elif policy is policies.EXCLUSIVE:
-            self.policy = ExclusivePolicy(maxWorkers)
+            self.policy = ExclusivePolicy(maxWorkers, profLevel=profLevel)
         else:
             raise PoolError("Unrecognized policy: " + str(policy))
 
-        self.profs = profiling.profCollection()
+        self.profs = createProfiler(self.profLevel)
 
         # {doneFut: wID}
         self.pendingRuns = {}
@@ -562,8 +558,23 @@ class _PoolActor():
         await self.idle.wait()
 
         latestProfs = self.profs
-        self.profs = profiling.profCollection()
+        self.profs = createProfiler(self.profLevel)
 
         latestProfs.merge(await self.policy.getProfile())
 
         return latestProfs
+
+
+def mergePerGroupStats(base, delta):
+    for cID, deltaClient in delta.items():
+        if cID in base:
+            base[cID].merge(deltaClient)
+        else:
+            base[cID] = deltaClient
+
+
+def createProfiler(level):
+    if level > 0:
+        return profiling.profCollection(detail=True)
+    else:
+        return profiling.profCollection()
