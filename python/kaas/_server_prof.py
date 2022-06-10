@@ -143,6 +143,12 @@ class kaasBuf():
         return "KaaS Buffer (name={}, key={}, dirty={}, ephemeral={}, onDevice={}, size={})".format(
                 self.name, self.key, self.dirty, self.ephemeral, self.onDevice, self.size)
 
+    def __hash__(self):
+        return hash(self.bID)
+
+    def __eq__(self, other):
+        return self is other
+
     def updateValue(self, newBuf):
         """Replace the data in this buffer. If there is already a device
         buffer, it will be updated as well. If there is no existing device
@@ -322,32 +328,34 @@ class lruPolicy():
     def __init__(self):
         # Only contains buffers that are currently on the device. Constants are
         # given higher priority than other types of buffers.
-        self.lruConst = collections.deque()
-        self.lruOther = collections.deque()
+
+        # OrderedDicts let us maintain LRU order while also having O(1) updates
+        # to arbitrary entries. We only care about the key, the values are
+        # arbitrary.
+        self.lruConst = collections.OrderedDict()
+        self.lruOther = collections.OrderedDict()
 
     def remove(self, buf):
         """Remove buffer from consideration"""
         if buf.useCount > 2:
-            self.lruConst.remove(buf)
+            del self.lruConst[buf]
         else:
-            self.lruOther.remove(buf)
+            del self.lruOther[buf]
 
     def push(self, buf):
         """Place buffer in the most-recently-used slot"""
         if buf.useCount > 2:
-            self.lruConst.appendleft(buf)
+            self.lruConst[buf] = None
         else:
-            self.lruOther.appendleft(buf)
+            self.lruOther[buf] = None
 
     def pop(self):
         """Remove and return the least recently used buffer"""
         # pull from lruOther if we can, otherwise start evicting consts
-        if self.lruOther:
-            b = self.lruOther.pop()
+        if len(self.lruOther) > 0:
+            return self.lruOther.popitem(last=False)[0]
         else:
-            b = self.lruConst.pop()
-
-        return b
+            return self.lruConst.popitem(last=False)[0]
 
 
 class bufferCache():
@@ -444,6 +452,7 @@ class bufferCache():
 
         buf = self.bufs.get(bID, None)
         if buf is None:
+            updateProf('n_hostDMiss', 1)
             if bSpec.ephemeral or overwrite:
                 logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{bSpec.size}")
                 hbuf = None
@@ -461,44 +470,22 @@ class bufferCache():
         else:
             if buf.key != bSpec.key and not (bSpec.ephemeral or overwrite):
                 logging.debug(f"Loading new value into buffer {bID} from key {bSpec.key}")
+                updateProf('n_hostDMiss', 1)
+
+                pstart = startTimer()
                 hbuf = self.kv.get(bSpec.key)
+                updateTimer('t_hostDLoad', pstart, final=False)
+
                 buf.updateValue(hbuf)
+                updateProf('s_hostDLoad', buf.size)
             else:
+                updateProf('n_hostDHit', 1)
                 logging.debug(f"Re-using cached buffer {bID}")
 
             # Pin the buffer in memory by removing it from the eviction policy.
             # release() will place it back in the policy.
             if buf.onDevice:
                 self.policy.remove(buf)
-
-        # buf = self.bufs.get(key, None)
-        # if buf is not None:
-        #     logging.debug("Loading from Cache: {}".format(bSpec.name))
-        #     updateProf('n_hostDHit', 1)
-        #
-        #     # Reset LRU
-        #     if buf.onDevice:
-        #         self.policy.remove(buf)
-        # else:
-        #     updateProf('n_hostDMiss', 1)
-        #     if bSpec.ephemeral or overwrite:
-        #         logging.debug("Loading (new buffer): {}".format(bSpec.name))
-        #         buf = kaasBuf.fromSpec(bSpec)
-        #
-        #         if buf.ephemeral:
-        #             self.ephemerals[key] = buf
-        #     else:
-        #         pstart = startTimer()
-        #         raw = self.kv.get(key, profile=getProf(mod='kv'), profFinal=False)
-        #         updateTimer('t_hostDLoad', pstart, final=False)
-        #
-        #         if raw is None:
-        #             logging.debug("Loading (new buffer): {}".format(bSpec.name))
-        #             buf = kaasBuf.fromSpec(bSpec)
-        #         else:
-        #             logging.debug("Loading from KV: {} (key: {})".format(bSpec.name, key))
-        #             updateProf('s_hostDLoad', bSpec.size)
-        #             buf = kaasBuf.fromSpec(bSpec, src=raw)
 
         self.makeRoom(buf.size)
 
