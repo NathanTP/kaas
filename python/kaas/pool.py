@@ -397,8 +397,8 @@ class Pool():
                 need to dereference twice: once to get the worker return
                 reference(s), and again to get the value of those return(s).
         """
-        return self.pool.run.remote(groupID, methodName, num_returns=num_returns,
-                                    args=args, kwargs=kwargs, refDeps=refDeps)
+        return self.pool.run.options(num_returns=num_returns).\
+            remote(groupID, methodName, num_returns=num_returns, args=args, kwargs=kwargs, refDeps=refDeps)
 
     def getProfile(self) -> profiling.profCollection:
         """Returns any profiling data collected so far in this pool and resets
@@ -525,7 +525,7 @@ class _PoolActor():
         if num_returns == 1:
             return res[0]
         else:
-            return res
+            return tuple(res)
 
     async def handleEvent(self):
         """Event handler for worker completions and new requests (via run())."""
