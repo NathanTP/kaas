@@ -405,6 +405,7 @@ class bufferCache():
                 updateProf('s_devDWriteBack', b.size())
                 b.toHost()
 
+            assert b.onDevice
             b.freeDevice()
             self.size -= b.size
 
@@ -435,7 +436,8 @@ class bufferCache():
         necessary. If overwrite=True, a new buffer will be created. If the
         buffer is already in the cache and dirty, it will be written back and
         re-read (you should probably make sure this doesn't happen by flushing
-        when needed)."""
+        when needed). Buffers are pinned in device memory when loaded, you must
+        explicitly release() them when you are done."""
 
         # key = bSpec.key
         bID = f"{clientID}:{bSpec.name}"
@@ -463,6 +465,11 @@ class bufferCache():
                 buf.updateValue(hbuf)
             else:
                 logging.debug(f"Re-using cached buffer {bID}")
+
+            # Pin the buffer in memory by removing it from the eviction policy.
+            # release() will place it back in the policy.
+            if buf.onDevice:
+                self.policy.remove(buf)
 
         # buf = self.bufs.get(key, None)
         # if buf is not None:
@@ -500,6 +507,10 @@ class bufferCache():
         return buf
 
     def release(self, buf):
+        """When buffers are loaded, they are automatically pinned in memory.
+        You must explicitly release them to make them eligible for eviction.
+        The primary reason for this is so that we can guarantee a single
+        kernel's memory will be available."""
         buf.useCount += 1
         self.policy.push(buf)
 
