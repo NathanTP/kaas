@@ -11,6 +11,7 @@ from . import cutlass
 
 from . import complexCutlass
 
+# logLevel = logging.DEBUG
 logLevel = logging.WARN
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logLevel)
 
@@ -447,8 +448,10 @@ class bufferCache():
         when needed). Buffers are pinned in device memory when loaded, you must
         explicitly release() them when you are done."""
 
-        # key = bSpec.key
-        bID = f"{clientID}:{bSpec.name}"
+        # Unique identifier for this buffer used for indexing into various
+        # buffer cache datastructures. It only needs to be unique, the value is
+        # maybe useful for debugging but otherwise meaningless.
+        bID = f"{clientID}:{hash(bSpec.key)}"
 
         buf = self.bufs.get(bID, None)
         if buf is None:
