@@ -8,6 +8,10 @@ import contextlib
 import ctypes
 
 
+cudaRT = None
+profilerStarted = False
+
+
 class prof():
     def __init__(self, fromDict=None, detail=False):
         """A profiler object for a metric or event type. The counter can be
