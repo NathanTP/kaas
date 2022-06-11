@@ -2,7 +2,6 @@ from . import profiling
 import cloudpickle as pickle
 import copy
 from . import _server_prof as _server
-# from ._server_prof import kaasServeInternal
 
 
 class KVKeyError(Exception):
@@ -89,4 +88,5 @@ def invoke(rawReq, kv, stats=None):
         req = rawReq[0]
         renameMap = rawReq[1]
         req.reKey(renameMap)
-        _server.kaasServeInternal(req, kv, stats)
+
+        return tuple(_server.kaasServeInternal(req, kv, stats))

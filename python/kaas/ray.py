@@ -1,6 +1,7 @@
 # from . import _server_light as _server
 from . import _server_prof as _server
 from . import profiling
+from . import pool
 
 import ray
 
@@ -68,7 +69,10 @@ def invoke(rawReq, stats=None, clientID=None):
         {bufferName -> newRef} that reassigns keys (ray references) to names in
         the requests buffer list.  This helps avoid extra
         serialization/deserialization (which is expensive for kaasReq in some
-        cases)."""
+        cases).
+
+    Returns: tuple (i.e. multiple returns) of references to output objects
+    """
     kv = _rayKV()
     with profiling.timer('t_e2e', stats):
         reqRef = rawReq[0]
@@ -88,14 +92,15 @@ def invoke(rawReq, stats=None, clientID=None):
     for outKey in visibleOutputs:
         returns.append(kv.newRefs[outKey])
 
-    return returns
+    return tuple(returns)
 
 
 @ray.remote(num_gpus=1)
-class invokerActor():
+class invokerActor(pool.PoolWorker):
     def __init__(self):
         """invokerActor is the ray version of a kaas worker, it is assigned a
         single GPU and supports requests from multiple clients."""
+        super().__init__()
         init()
 
         # {clientID -> profiling.profCollection}
@@ -110,24 +115,14 @@ class invokerActor():
         """Invoke the kaasReq req on this actor. You may optionally pass a
         clientID. clientIDs are used for per-client profiling and may affect
         scheduling/caching policies."""
-        if clientID not in self.stats:
-            self.stats[clientID] = profiling.profCollection()
+        # if clientID not in self.stats:
+        #     self.stats[clientID] = profiling.profCollection()
 
-        with profiling.timer('t_e2e', self.stats[clientID]):
-            res = invoke(req, self.stats[clientID])
+        clientProfs = self.profs.mod(clientID)
+        with profiling.timer('t_e2e', clientProfs):
+            res = invoke(req, clientProfs)
 
-        # Our actor invoke() should return all outputs directly (multiple return values).
-        # The internal invoke() returns a list of output references. We want
-        # the caller of actor.invoke to get references to the outputs directly.
-        # For num_returns >= 2, returning a list here gives the caller the
-        # output references directly. For num_returns=1, ray doesn't unpack the
-        # list, it returns a reference to a list that we have to later unstrip.
-        # We work around that here so that the caller always gets one or more
-        # references to the actual outputs as direct returns.
-        if len(res) == 1:
-            return res[0]
-        else:
-            return res
+        return res
 
 
 @ray.remote(num_gpus=1)
@@ -137,17 +132,4 @@ def invokerTask(req):
     but it can be useful from time to time."""
     init()
 
-    res = invoke(req)
-
-    # Our actor invoke() should return all outputs directly (multiple return values).
-    # The internal invoke() returns a list of output references. We want
-    # the caller of actor.invoke to get references to the outputs directly.
-    # For num_returns >= 2, returning a list here gives the caller the
-    # output references directly. For num_returns=1, ray doesn't unpack the
-    # list, it returns a reference to a list that we have to later unstrip.
-    # We work around that here so that the caller always gets one or more
-    # references to the actual outputs as direct returns.
-    if len(res) == 1:
-        return res[0]
-    else:
-        return res
+    return invoke(req)

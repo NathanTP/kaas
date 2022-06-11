@@ -6,16 +6,17 @@ import pathlib
 VERSION = '0.0.1'
 
 with open("requirements.txt", "r") as f:
-    install_requires = f.readlines()
+    install_requires = f.read().splitlines()
 
-if shutil.which('nvcc') is not None:
-    install_requires.append('pycuda')
+if shutil.which('nvcc') is None:
+    install_requires.remove('pycuda')
+else:
+    sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/cutlass', check=True)
+    sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/complexCutlass', check=True)
+sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'test/kerns', check=True)
 
 with open("../README.md", "r") as fh:
     long_description = fh.read()
-
-#XXX
-# sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/cutlass', check=True)
 
 setuptools.setup(
     name="kaas",
@@ -34,6 +35,6 @@ setuptools.setup(
         "License :: OSI Approved :: MIT License",
         "Operating System :: Linux",
     ],
-    python_requires='>=3.8',
+    python_requires='>=3.9',
     include_package_data=True
 )
