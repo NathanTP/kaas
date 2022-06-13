@@ -450,8 +450,12 @@ class bufferCache():
 
         # Unique identifier for this buffer used for indexing into various
         # buffer cache datastructures. It only needs to be unique, the value is
-        # maybe useful for debugging but otherwise meaningless.
-        bID = f"{clientID}:{hash(bSpec.key)}"
+        # maybe useful for debugging but otherwise meaningless. Buffers are
+        # first isolated based on clientID (must be unique in the system), then
+        # by name (must be unique within a client), and then key (buffers can
+        # be re-mapped to different keys through their lifetime, but the same
+        # key could be used for multiple buffers).
+        bID = f"{clientID}_{bSpec.name}_{bSpec.key}"
 
         buf = self.bufs.get(bID, None)
         if buf is None:
