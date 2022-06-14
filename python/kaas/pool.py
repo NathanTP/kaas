@@ -39,15 +39,43 @@ class PoolWorker():
     """Inherit from this to make your class compatible with Pools.
     To include profiling data with your worker, you should call
     super().__init__ and use the provided self.profs variable."""
-    def __init__(self, profLevel=0):
+    def __init__(self, profLevel=0, defaultGroup=None):
         self.profLevel = profLevel
-        self.profs = createProfiler(level=self.profLevel)
+        self._defaultGroup = defaultGroup
+        self._initProfs()
+
+    def getProfs(self):
+        return self._groupProfs
+
+    def _initProfs(self):
+        # Top-level profiling object. This is what is reported by _getProfile()
+        self._profs = createProfiler(level=self.profLevel)
+
+        # Profiling data for the currently active group
+        if self._defaultGroup is None:
+            self._groupProfs = self._profs
+        else:
+            self._groupProfs = self._profs.mod('groups').mod(self._defaultGroup)
 
     # Note: args and kwargs are passed directly (rather than in a list/dict)
     # because they may contain references that Ray would need to manage.
-    def _runWithCompletion(self, fName, *args, **kwargs):
+    def _runWithCompletion(self, fName, *args, groupID=None, **kwargs):
         """Wraps the method 'fname' with a completion signal as required by
-        Pools"""
+        Pools.
+
+        Arguments:
+            fName: function to run within the actor.
+            groupID: Some policies allow multiple groups to use the same
+                worker. In some cases we may still wish to distinguish groups
+                within the worker itself. If None, profs will be collected at
+                the top-level (global to the worker).
+            args,kwargs: These will be passed to the function.
+        """
+        if groupID is None:
+            self._groupProfs = self._profs
+        else:
+            self._groupProfs = self._profs.mod('groups').mod(groupID)
+
         rets = getattr(self, fName)(*args, **kwargs)
         if not isinstance(rets, tuple):
             rets = (rets,)
@@ -57,11 +85,11 @@ class PoolWorker():
     def _getProfile(self):
         # Users are not required to initialize profiling
         try:
-            if self.profs is None:
-                return self._createProfiler()
+            if self._profs is None:
+                return createProfiler()
             else:
-                latestProfs = self.profs
-                self.profs = createProfiler(level=self.profLevel)
+                latestProfs = self._profs
+                self._initProfs()
                 return latestProfs
         except AttributeError:
             raise PoolError("PoolWorkers must call super().__init__() in order to use profiling")
@@ -107,16 +135,41 @@ class Policy(abc.ABC):
 
     @abc.abstractmethod
     def getProfile(self) -> profiling.profCollection:
-        """Return any collected profiling data and reset profiling"""
+        """Return any collected profiling data and reset profiling. The exact
+        schema is up to each policy, but there is a common structure:
+
+        {
+            'pool': {
+                global pool profs,
+                {'groups':
+                    groupID: {per-group pool-specific profs},
+                    ...
+                }
+            }
+            'workers': {
+                global worker profs,
+                {'groups':
+                    groupID: {per-group worker profs}
+                    ...
+                }
+            }
+            }
+        """
         pass
 
 
 class BalancePolicy(Policy):
-    def __init__(self, maxWorkers, profLevel=0):
+    def __init__(self, maxWorkers, profLevel=0, globalGroupID=None):
         """The BalancePolicy balances requests across workers with no affinity
         or isolation between clients. Multiple clients may be registerd, but
         they must all use the same worker class.
             maxWorkers: Maximum number of concurrent workers to spawn
+            profLevel: Sets the degree of profiling to be performed (lower is less invasive)
+            globalGroupID: The balance policy supports multiple groups
+            simultaneously. By default, it uses the provided per-request
+            groupID to measure some metrics per-group. If groupID is provided
+            here, all metrics (including policy-wide metrics) will be recorded
+            under that group.
         """
         self.maxWorkers = maxWorkers
         self.numWorkers = 0
@@ -124,7 +177,8 @@ class BalancePolicy(Policy):
         self.nextWID = 0
 
         self.profLevel = profLevel
-        self.profs = createProfiler(self.profLevel)
+        self.globalGroupID = globalGroupID
+        self.initProfs()
 
         # References to profiling data from killed workers
         self.pendingProfs = []
@@ -136,6 +190,13 @@ class BalancePolicy(Policy):
 
         self.pendingReqs = collections.deque()
 
+    def initProfs(self):
+        self.profTop = createProfiler(self.profLevel)
+        if self.globalGroupID is None:
+            self.profs = self.profTop.mod('pool')
+        else:
+            self.profs = self.profTop.mod('pool').mod('groups').mod(self.globalGroupID)
+
     def scale(self, newMax):
         """Change the target number of workers."""
         delta = newMax - self.maxWorkers
@@ -143,7 +204,8 @@ class BalancePolicy(Policy):
             self.profs['n_cold_start'].increment(delta)
             # scale up
             for i in range(delta):
-                self.freeWorkers[self.nextWID] = self.workerClass.remote(profLevel=self.profLevel)
+                self.freeWorkers[self.nextWID] = self.workerClass.remote(
+                    profLevel=self.profLevel, defaultGroup=self.globalGroupID)
                 self.nextWID += 1
 
         elif delta < 0:
@@ -217,7 +279,8 @@ class BalancePolicy(Policy):
 
             resRefs = worker._runWithCompletion.options(
                 num_returns=req.num_returns + 1).remote(
-                req.fName, *req.args, **req.kwargs)
+                req.fName, *req.args,
+                groupID=req.groupID, **req.kwargs)
 
             req.resFuture.set_result(resRefs[1:])
             doneFut = asyncio.wrap_future(resRefs[1].future())
@@ -226,6 +289,10 @@ class BalancePolicy(Policy):
         return newRuns
 
     async def getProfile(self):
+        """Schema: There is only one pool so there are no per-group pool profs
+        (top-level pool profs are aggregated across all groups).
+
+        """
         if len(self.busyWorkers) != 0:
             raise PoolError("Cannot call getProfile() when there are pending requests")
 
@@ -235,11 +302,12 @@ class BalancePolicy(Policy):
         workerStats = await asyncio.gather(*self.pendingProfs)
         self.pendingProfs = []
 
-        latestProfs = self.profs
-        self.profs = createProfiler(level=self.profLevel)
-
+        workerProfs = self.profTop.mod('workers')
         for workerStat in workerStats:
-            latestProfs.merge(workerStat)
+            workerProfs.merge(workerStat)
+
+        latestProfs = self.profTop
+        self.initProfs()
 
         return latestProfs
 
@@ -250,13 +318,14 @@ class ExclusivePolicy(Policy):
         self.numWorkers = 0
 
         self.profLevel = profLevel
-        self.profs = createProfiler(level=self.profLevel)
+        self.profTop = createProfiler(level=self.profLevel)
+        self.poolProfs = self.profTop.mod('pool')
 
         # {groupID: BalancePolicy}
         self.groups = {}
 
     def registerGroup(self, groupID, workerClass: PoolWorker):
-        group = BalancePolicy(0)
+        group = BalancePolicy(0, globalGroupID=groupID, profLevel=self.profLevel)
         group.registerGroup(groupID, workerClass)
         self.groups[groupID] = group
 
@@ -327,13 +396,23 @@ class ExclusivePolicy(Policy):
         return newRuns
 
     async def getProfile(self):
-        latestProfs = self.profs
-        self.profs = createProfiler(level=self.profLevel)
+        """Schema: Each group get's it's own private pool so we report
+        per-group pool profs. Even though each pool only has one group, we
+        still report the per-group worker-specific stats per pool to match the
+        behavior of BALANCE.
+        """
+        workerProfs = self.profTop.mod('workers')
+        poolProfs = self.profTop.mod('pool')
 
-        groupProfs = await asyncio.gather(*[group.getProfile() for group in self.groups.values()])
+        groupPoolProfs = await asyncio.gather(*[group.getProfile() for group in self.groups.values()])
 
-        for groupID, groupProf in zip(self.groups.keys(), groupProfs):
-            latestProfs.mod(groupID).merge(groupProf)
+        for groupID, groupProf in zip(self.groups.keys(), groupPoolProfs):
+            poolProfs.merge(groupProf.mod('pool'))
+            workerProfs.merge(groupProf.mod('workers'))
+
+        latestProfs = self.profTop
+        self.profTop = createProfiler(level=self.profLevel)
+        self.profs = self.profTop.mod('pool')
 
         return latestProfs
 
@@ -444,7 +523,9 @@ class _PoolActor():
         else:
             raise PoolError("Unrecognized policy: " + str(policy))
 
-        self.profs = createProfiler(self.profLevel)
+        self.profTop = createProfiler(self.profLevel)
+        self.profs = self.profTop.mod('pool')
+        self.groupProfs = self.profs.mod('groups')
 
         # {doneFut: wID}
         self.pendingRuns = {}
@@ -473,7 +554,6 @@ class _PoolActor():
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run()."""
         self.policy.registerGroup(groupID, workerClass)
-        self.profs.mod(groupID)
 
     # run() keeps a Ray remote function alive for the caller so that it can
     # proxy the request to the pool and the response back to the caller. run()
@@ -516,7 +596,7 @@ class _PoolActor():
         if refDeps is not None:
             await self._waitRefs(refDeps)
 
-        with profiling.timer('t_policy_run', self.profs.mod(groupID)):
+        with profiling.timer('t_policy_run', self.groupProfs.mod(groupID)):
             self.newReqQ.put_nowait(req)
             res = await resFuture
 
@@ -557,10 +637,12 @@ class _PoolActor():
     async def getProfile(self) -> profiling.profCollection:
         await self.idle.wait()
 
-        latestProfs = self.profs
-        self.profs = createProfiler(self.profLevel)
+        self.profTop.merge(await self.policy.getProfile())
 
-        latestProfs.merge(await self.policy.getProfile())
+        latestProfs = self.profTop
+        self.profTop = createProfiler(self.profLevel)
+        self.profs = self.profTop.mod('pool')
+        self.groupProfs = self.profs.mod('groups')
 
         return latestProfs
 

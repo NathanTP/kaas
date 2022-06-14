@@ -5,17 +5,17 @@ import kaas.pool
 
 @ray.remote
 class TestWorker(kaas.pool.PoolWorker):
-    def __init__(self):
-        # Initialize the PoolWorker parent class to get self.profs
-        super().__init__()
-        self.profs['n_initialized'].increment(1)
+    def __init__(self, **workerKwargs):
+        # must be called before accessing inherited methods like getProfs()
+        super().__init__(**workerKwargs)
+        self.getProfs()['n_initialized'].increment(1)
 
     def returnOne(self, arg):
-        self.profs['n_returnOne'].increment(1)
+        self.getProfs()['n_returnOne'].increment(1)
         return arg
 
     def returnTwo(self, arg):
-        self.profs['n_returnTwo'].increment(1)
+        self.getProfs()['n_returnTwo'].increment(1)
         return True, arg
 
 
@@ -75,17 +75,22 @@ def testProfs(policy):
 
     groups = ['group0', 'group1']
     # groups = ['group0']
+    retRefs = []
     for groupID in groups:
         pool.registerGroup(groupID, TestWorker)
-        retRefs = []
         for i in range(5):
-            retRefs.append(ray.get(pool.run(groupID, 'returnOne', args=['testInp'])))
+            retRefs.append(pool.run(groupID, 'returnOne', args=['testInp']))
 
-        ray.get(retRefs)
+    ray.get(ray.get(retRefs))
 
-    profs = pool.getProfile().report()
-    if not set(groups) <= set(profs.keys()):
+    profs = pool.getProfile()
+
+    poolGroups = set([k for k, v in profs.mod('pool').mod('groups').getMods()])
+    workerGroups = set([k for k, v in profs.mod('workers').mod('groups').getMods()])
+    if not set(groups) <= poolGroups or \
+       not set(groups) <= workerGroups:
         print("Failure: missing groups")
+        print(profs)
         return False
 
     return True
@@ -94,32 +99,33 @@ def testProfs(policy):
 if __name__ == "__main__":
     ray.init()
 
-    print("Single Return BalancePolicy")
-    if not testOneRet(kaas.pool.policies.BALANCE):
-        print("FAIL")
-    else:
-        print("SUCCESS")
-
-    print("Reference Argument BalancePolicy")
-    if not testOneRet(kaas.pool.policies.BALANCE, inputRef=True):
-        print("FAIL")
-    else:
-        print("SUCCESS")
-
-    print("Min test ExclusivePolicy")
-    if not testOneRet(kaas.pool.policies.EXCLUSIVE):
-        print("FAIL")
-    else:
-        print("SUCCESS")
-
-    print("Multiple Returns")
-    if not testMultiRet(kaas.pool.policies.BALANCE):
-        print("FAIL")
-    else:
-        print("SUCCESS")
-
+    # print("Single Return BalancePolicy")
+    # if not testOneRet(kaas.pool.policies.BALANCE):
+    #     print("FAIL")
+    # else:
+    #     print("SUCCESS")
+    #
+    # print("Reference Argument BalancePolicy")
+    # if not testOneRet(kaas.pool.policies.BALANCE, inputRef=True):
+    #     print("FAIL")
+    # else:
+    #     print("SUCCESS")
+    #
+    # print("Min test ExclusivePolicy")
+    # if not testOneRet(kaas.pool.policies.EXCLUSIVE):
+    #     print("FAIL")
+    # else:
+    #     print("SUCCESS")
+    #
+    # print("Multiple Returns")
+    # if not testMultiRet(kaas.pool.policies.BALANCE):
+    #     print("FAIL")
+    # else:
+    #     print("SUCCESS")
+    #
     print("Profiling Test")
-    if not testProfs(kaas.pool.policies.EXCLUSIVE):
+    if not testProfs(kaas.pool.policies.BALANCE):
+    # if not testProfs(kaas.pool.policies.EXCLUSIVE):
         print("FAIL")
     else:
         print("SUCCESS")

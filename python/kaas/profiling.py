@@ -19,9 +19,9 @@ class prof():
         a new event. If detail==true, all events are logged allowing more
         complex statistics. This may affect performance if there are many
         events."""
-        self.detail = detail
+        self._detail = detail
         if fromDict is not None:
-            if self.detail:
+            if self._detail:
                 self.events = fromDict['events']
             self.total = fromDict['total']
             self.nevent = fromDict['nevent']
@@ -29,14 +29,14 @@ class prof():
             self.total = 0.0
             self.nevent = 0
 
-            if self.detail:
+            if self._detail:
                 self.currentEvent = 0.0
                 self.events = []
 
     def update(self, n):
         """Update increases the value of this entry for the current event."""
         self.total += n
-        if self.detail:
+        if self._detail:
             self.currentEvent += n
 
     def increment(self, n=0):
@@ -44,7 +44,7 @@ class prof():
         provided, the current event will be updated by n before finalizing."""
         self.update(n)
         self.nevent += 1
-        if self.detail:
+        if self._detail:
             self.events.append(self.currentEvent)
             self.currentEvent = 0.0
 
@@ -66,7 +66,7 @@ class prof():
         rep['total'] = self.total
         rep['mean'] = self.total / self.nevent
 
-        if self.detail:
+        if self._detail:
             events = np.array(self.events)
             rep['min'] = events.min()
             rep['max'] = events.max()
@@ -92,56 +92,63 @@ class profCollection(collections.abc.MutableMapping):
     def __init__(self, detail=False):
         # a map of modules included in these stats. Each module is a
         # profCollection. Submodules can nest indefinitely.
-        self.detail = detail
+        self._detail = detail
 
-        self.mods = {}
+        self._mods = {}
 
-        self.profs = dict()
+        self._profs = dict()
 
     def __contains__(self, key):
-        return key in self.profs
+        return key in self._profs
 
     def __getitem__(self, key):
-        if key not in self.profs:
-            self.profs[key] = prof(detail=self.detail)
-        return self.profs[key]
+        if key not in self._profs:
+            self._profs[key] = prof(detail=self._detail)
+        return self._profs[key]
 
     def __setitem__(self, key, value):
-        self.profs[key] = value
+        self._profs[key] = value
 
     def __delitem__(self, key):
-        del self.profs[key]
+        del self._profs[key]
 
     def __iter__(self):
-        return iter(self.profs)
+        """Iterating a profCollection returns any profs contained. To get
+        modules, use getMods()."""
+        return iter(self._profs)
 
     def __len__(self):
-        return len(self.profs)
+        return len(self._profs)
 
     def __str__(self):
         return json.dumps(self.report(), indent=4)
 
     def mod(self, name):
-        if name not in self.mods:
-            self.mods[name] = profCollection(detail=self.detail)
+        if name not in self._mods:
+            self._mods[name] = profCollection(detail=self._detail)
 
-        return self.mods[name]
+        return self._mods[name]
+
+    def getMods(self):
+        """Return iterable of (name, profCollection) for each module in this
+        collection"""
+        return self._mods.items()
 
     def merge(self, new, prefix=''):
         # Start by merging the direct stats
         for k, v in new.items():
             newKey = prefix+k
-            if newKey in self.profs:
-                self.profs[newKey].increment(v.total)
+            if newKey in self._profs:
+                self._profs[newKey].increment(v.total)
             else:
-                self.profs[newKey] = v
+                self._profs[newKey] = v
 
         # Now recursively handle modules
-        for name, mod in new.mods.items():
+        for name, mod in new._mods.items():
             # Merging into an empty profCollection causes a deep copy
-            if name not in self.mods:
-                self.mods[name] = profCollection(detail=self.detail)
-            self.mods[name].merge(mod)
+            if name not in self._mods:
+                self._mods[name] = profCollection(detail=self._detail)
+            self._mods[name].merge(mod)
 
     def report(self, includeEvents=False, metrics=None):
         """Create a report dctionary from this collection of the form
@@ -150,13 +157,13 @@ class profCollection(collections.abc.MutableMapping):
         the report. See prof.report() for details of the contents of each
         metricReport, including the behavior of 'includeEvents' and 'metrics'."""
         report = {}
-        for name, v in self.profs.items():
+        for name, v in self._profs.items():
             try:
                 report[name] = v.report(includeEvents=includeEvents, metrics=metrics)
             except Exception as e:
                 raise RuntimeError(f"Failed to report metric '{name}'") from e
 
-        for name, mod in self.mods.items():
+        for name, mod in self._mods.items():
             report[name] = mod.report(includeEvents=includeEvents, metrics=metrics)
 
         return report
@@ -166,8 +173,8 @@ class profCollection(collections.abc.MutableMapping):
         to exist, but will be empty (it is safe to keep references to modules
         after reset()).
         """
-        self.profs = {}
-        for mod in self.mods.values():
+        self._profs = {}
+        for mod in self._mods.values():
             mod.reset()
 
 
