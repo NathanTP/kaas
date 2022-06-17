@@ -11,6 +11,13 @@ from . import cutlass
 
 from . import complexCutlass
 
+# NOTE on the PROFDISABLE comments: I hacked up a way to disable all the
+# cumbersome profiling and debugging code as needed. Even with python-level
+# disabling (e.g. "if profLevel > 0"), things can really slow down. Any line
+# with a "#  PROFDISABLE" comment will be deleted in light mode. This is a
+# source-level transformation so make sure the code works with those lines
+# literally deleted. Use ./lightenServer.sh to create _server_light.py.
+
 # logLevel = logging.DEBUG
 logLevel = logging.WARN
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logLevel)
@@ -20,7 +27,7 @@ logging.basicConfig(format="%(levelname)s: %(message)s", level=logLevel)
 #   - 1 metrics that will have little effect on performance
 #   - 2 synchronize cuda aggresively to get accurate measurements (hurts e2e
 #       perf)
-profLevel = 2
+profLevel = 1
 
 # This is a global reference to the current ff.profCollection (reset for each call)
 profs = None
@@ -160,18 +167,16 @@ class kaasBuf():
             self.hbuf = None
         else:
             newBuf = memoryview(newBuf).cast('B')
-            if newBuf.nbytes != self.size:
-                # Maybe this should be an error. If self.size < newBuf.nbytes
-                # we'll get a CUDA error, otherwise it's a warning
-                logging.warn(f"(buffer {self.bID}) Unexpected size for new data: buffer is {self.size} but new value is {newBuf.nbytes}")
+            if newBuf.nbytes != self.size:  # PROFDISABLE
+                logging.warn(f"(buffer {self.bID}) Unexpected size for new data: buffer is {self.size} but new value is {newBuf.nbytes}")  # PROFDISABLE
 
             self.hbuf = newBuf
             if self.onDevice:
-                logging.debug(f"Moving {self.size}B from host buffer '{self.name}' to device address 0x{hex(int(self.dbuf))}")
-                pstart = startTimer()
+                logging.debug(f"Moving {self.size}B from host buffer '{self.name}' to device address 0x{hex(int(self.dbuf))}")  # PROFDISABLE
+                pstart = startTimer()  # PROFDISABLE
                 cuda.memcpy_htod(self.dbuf, self.hbuf[self.offset:self.size])
-                profSync()
-                updateTimer('t_htod', pstart, final=False)
+                profSync()  # PROFDISABLE
+                updateTimer('t_htod', pstart, final=False)  # PROFDISABLE
 
     def toDevice(self):
         """Place the buffer onto the device if it is not already there.  If no
@@ -181,19 +186,19 @@ class kaasBuf():
         if self.onDevice:
             return 0
         else:
-            updateProf('s_htod', self.size)
+            updateProf('s_htod', self.size)  # PROFDISABLE
 
-            pstart = startTimer()
+            pstart = startTimer()  # PROFDISABLE
             self.dbuf = cuda.mem_alloc(self.size)
-            profSync()
-            updateTimer('t_cudaMM', pstart, final=False)
+            profSync()  # PROFDISABLE
+            updateTimer('t_cudaMM', pstart, final=False)  # PROFDISABLE
 
             if self.hbuf is not None:
-                logging.debug(f"Moving {self.size}B from host buffer '{self.name}' to device address 0x{hex(int(self.dbuf))}")
-                pstart = startTimer()
+                logging.debug(f"Moving {self.size}B from host buffer '{self.name}' to device address 0x{hex(int(self.dbuf))}")  # PROFDISABLE
+                pstart = startTimer()  # PROFDISABLE
                 cuda.memcpy_htod(self.dbuf, self.hbuf[self.offset:self.offset+self.size])
-                profSync()
-                updateTimer('t_htod', pstart, final=False)
+                profSync()  # PROFDISABLE
+                updateTimer('t_htod', pstart, final=False)  # PROFDISABLE
 
             self.onDevice = True
             return self.size
@@ -206,41 +211,41 @@ class kaasBuf():
         if not self.onDevice:
             return
         else:
-            logging.debug("Moving {}B from device (0x{}) {} to host".format(
-                self.size, hex(int(self.dbuf)), self.name))
+            logging.debug("Moving {}B from device (0x{}) {} to host".format(  # PROFDISABLE
+                self.size, hex(int(self.dbuf)), self.name))  # PROFDISABLE
 
             if self.hbuf is None:
-                pstart = startTimer()
+                pstart = startTimer()  # PROFDISABLE
                 self.hbuf = np.empty(self.size, dtype=np.int8)
-                updateTimer('t_hostMM', pstart, final=False)
+                updateTimer('t_hostMM', pstart, final=False)  # PROFDISABLE
 
-            updateProf('s_dtoh', self.size)
-            pstart = startTimer()
+            updateProf('s_dtoh', self.size)  # PROFDISABLE
+            pstart = startTimer()  # PROFDISABLE
             cuda.memcpy_dtoh(self.hbuf[self.offset:], self.dbuf)
-            profSync()
-            updateTimer('t_dtoh', pstart, final=False)
+            profSync()  # PROFDISABLE
+            updateTimer('t_dtoh', pstart, final=False)  # PROFDISABLE
 
     def freeDevice(self):
         """Free any memory that is allocated on the device."""
         if not self.onDevice:
             return
         else:
-            pstart = startTimer()
+            pstart = startTimer()  # PROFDISABLE
             self.dbuf.free()
-            profSync()
-            updateTimer('t_cudaMM', pstart, final=False)
+            profSync()  # PROFDISABLE
+            updateTimer('t_cudaMM', pstart, final=False)  # PROFDISABLE
 
             self.dbuf = None
             self.onDevice = False
 
     def clear(self):
-        logging.debug("Clearing existing buffer " + self.name)
-        pstart = startTimer()
+        logging.debug("Clearing existing buffer " + self.name)  # PROFDISABLE
+        pstart = startTimer()  # PROFDISABLE
         self.hbuf = None
         if self.onDevice:
             cuda.memset_d8(self.dbuf, 0, self.size)
-            profSync()
-        updateTimer('t_zero', pstart, final=False)
+            profSync()  # PROFDISABLE
+        updateTimer('t_zero', pstart, final=False)  # PROFDISABLE
 
 
 class kaasFunc():
@@ -273,23 +278,23 @@ class kaasFunc():
         args = literalVals + dAddrs
 
         if self.fName == "_ZN7cutlass6KernelINS_4gemm6kernel4GemmINS1_11threadblock12MmaPipelinedINS1_9GemmShapeILi128ELi128ELi8EEENS_9transform11threadblock22PredicatedTileIteratorINS_11MatrixShapeILi128ELi8EEEfNS_6layout8RowMajorELi1ENS8_30PitchLinearStripminedThreadMapINSD_16PitchLinearShapeILi8ELi128EEELi256ELi1EEELi1EEENS9_19RegularTileIteratorISC_fNSD_11ColumnMajorELi1ENS8_33TransposePitchLinearThreadMapSimtISI_EELi4EEENSA_INSB_ILi8ELi128EEEfSE_Li0ENSF_INSG_ILi128ELi8EEELi256ELi1EEELi1EEENSK_ISP_fSE_Li0ESR_Li4EEEfSE_NS4_9MmaPolicyINS1_4warp7MmaSimtINS6_ILi32ELi64ELi8EEEfSL_fSE_fSE_NSV_13MmaSimtPolicyINSB_ILi4ELi8EEENSD_19RowMajorInterleavedILi2EEENS6_ILi4ELi4ELi1EEEEELi1ELNS_16ComplexTransformE0ELS14_0EbEENSB_ILi4ELi0EEENSB_ILi0ELi0EEELi1EEENS_21NumericArrayConverterIffLi4ELNS_15FloatRoundStyleE2EEES1B_bEENS_8epilogue11threadblock8EpilogueIS7_S15_Li1ENS1E_22PredicatedTileIteratorINS1E_26OutputTileOptimalThreadMapINS1E_15OutputTileShapeILi128ELi1ELi4ELi4ELi1EEENS1I_ILi1ELi4ELi2ELi1ELi8EEELi256ELi1ELi32EEEfEENS1D_4warp20FragmentIteratorSimtISX_NS1_6thread3MmaINS6_ILi8ELi8ELi1EEEfSL_fSE_fSE_NS_4arch13OpMultiplyAddEbEESE_S13_EENS1N_16TileIteratorSimtISX_S1U_fSE_S13_EENS1E_18SharedLoadIteratorINS1L_18CompactedThreadMapEfLi4EEENS1D_6thread17LinearCombinationIfLi1EffLNS21_9ScaleType4KindE0ELS1A_2EEENSB_ILi0ELi17EEELi1EEENS4_30GemmIdentityThreadblockSwizzleILi1EEELb0EEEEEvNT_6ParamsE":
-            logging.debug("Invoking <<<{}, {}, {}>>>cutlassSgemm({})".format(gridDim, blockDim, sharedSize,
-                          ", ".join([str(lit) for lit in literalVals] + [str(b.name) for b in bufs])))
+            logging.debug("Invoking <<<{}, {}, {}>>>cutlassSgemm({})".format(gridDim, blockDim, sharedSize,  # PROFDISABLE
+                          ", ".join([str(lit) for lit in literalVals] + [str(b.name) for b in bufs])))  # PROFDISABLE
 
             cuda.memset_d8(bufs[2].dbuf, 0, bufs[2].size)
             params = cutlass.parseSgemmArgs(literalVals, dAddrs, kCache.cutlassAdapter)
             self.func.prepare("320s")
             return self.func.prepared_timed_call(gridDim, blockDim, params.contents, shared_size=sharedSize)
         elif self.fName == "_ZN7cutlass6KernelINS_4gemm6kernel4GemmINS1_11threadblock12MmaPipelinedINS1_9GemmShapeILi128ELi128ELi8EEENS_9transform11threadblock22PredicatedTileIteratorINS_11MatrixShapeILi128ELi8EEENS_7complexIfEENS_6layout8RowMajorELi1ENS8_30PitchLinearStripminedThreadMapINSF_16PitchLinearShapeILi8ELi128EEELi256ELi1EEELi1EEENS9_19RegularTileIteratorISC_SE_NSF_11ColumnMajorELi1ENS8_33TransposePitchLinearThreadMapSimtISK_EELi8EEENSA_INSB_ILi8ELi128EEESE_SG_Li0ENSH_INSI_ILi128ELi8EEELi256ELi1EEELi1EEENSM_ISR_SE_SG_Li0EST_Li8EEESE_SG_NS4_9MmaPolicyINS1_4warp7MmaSimtINS6_ILi32ELi64ELi8EEESE_SN_SE_SG_SE_SG_NSX_13MmaSimtPolicyINSB_ILi4ELi8EEENSF_19RowMajorInterleavedILi2EEENS6_ILi2ELi2ELi1EEEEELi1ELNS_16ComplexTransformE0ELS16_0EbEENSB_ILi2ELi0EEENSB_ILi0ELi0EEELi1EEENS_21NumericArrayConverterISE_SE_Li4ELNS_15FloatRoundStyleE2EEES1D_bEENS_8epilogue11threadblock8EpilogueIS7_S17_Li1ENS1G_22PredicatedTileIteratorINS1G_26OutputTileOptimalThreadMapINS1G_15OutputTileShapeILi128ELi1ELi4ELi4ELi1EEENS1K_ILi1ELi2ELi4ELi1ELi8EEELi256ELi1ELi64EEESE_EENS1F_4warp20FragmentIteratorSimtISZ_NS1_6thread3MmaINS6_ILi8ELi8ELi1EEESE_SN_SE_SG_SE_SG_NS_4arch13OpMultiplyAddEbEESG_S15_EENS1P_16TileIteratorSimtISZ_S1W_SE_SG_S15_EENS1G_18SharedLoadIteratorINS1N_18CompactedThreadMapESE_Li8EEENS1F_6thread17LinearCombinationISE_Li1ESE_SE_LNS23_9ScaleType4KindE0ELS1C_2EEENSB_ILi0ELi9EEELi1EEENS4_30GemmIdentityThreadblockSwizzleILi1EEELb0EEEEEvNT_6ParamsE":
-            logging.debug("Invoking <<<{}, {}, {}>>>cutlassComplexGemm({})".format(gridDim, blockDim, sharedSize,
-                          ", ".join([str(lit) for lit in literalVals] + [str(b.name) for b in bufs])))
+            logging.debug("Invoking <<<{}, {}, {}>>>cutlassComplexGemm({})".format(gridDim, blockDim, sharedSize,  # PROFDISABLE
+                          ", ".join([str(lit) for lit in literalVals] + [str(b.name) for b in bufs])))  # PROFDISABLE
             cuda.memset_d8(bufs[2].dbuf, 0, bufs[2].size)
             params = complexCutlass.parseSgemmArgs(literalVals, dAddrs, kCache.complexAdapter)
             self.func.prepare("328s")
             return self.func.prepared_timed_call(gridDim, blockDim, params.contents, shared_size=sharedSize)
         else:
-            logging.debug("Invoking <<<{}, {}, {}>>>{}({})".format(gridDim, blockDim, sharedSize, self.fName,
-                          ", ".join([str(lit) for lit in literalVals] + [str(b.name) for b in bufs])))
+            logging.debug("Invoking <<<{}, {}, {}>>>{}({})".format(gridDim, blockDim, sharedSize, self.fName,  # PROFDISABLE
+                          ", ".join([str(lit) for lit in literalVals] + [str(b.name) for b in bufs])))  # PROFDISABLE
             return self.func.prepared_timed_call(gridDim, blockDim, *args, shared_size=sharedSize)
 
 
@@ -306,8 +311,8 @@ class kernelCache():
 
     def get(self, spec):
         if spec.name not in self.kerns:
-            updateProf('n_KMiss', 1)
-            pstart = startTimer()
+            updateProf('n_KMiss', 1)  # PROFDISABLE
+            pstart = startTimer()  # PROFDISABLE
             try:
                 if spec.library not in self.libs:
                     self.libs[spec.library] = cuda.module_from_file(spec.library)
@@ -318,9 +323,9 @@ class kernelCache():
             litTypes = [lit.dtype for lit in spec.literals]
             self.kerns[spec.name] = kaasFunc(self.libs[spec.library], spec.kernel,
                                              litTypes, len(spec.arguments))
-            updateTimer('t_kernelLoad', pstart, final=False)
-        else:
-            updateProf('n_KHit', 1)
+            updateTimer('t_kernelLoad', pstart, final=False)  # PROFDISABLE
+        else:  # PROFDISABLE
+            updateProf('n_KHit', 1)  # PROFDISABLE
 
         return self.kerns[spec.name]
 
@@ -406,12 +411,12 @@ class bufferCache():
 
     def makeRoom(self, sz):
         while self.cap - self.size < sz:
-            updateProf('n_devDEvict', 1)
+            updateProf('n_devDEvict', 1)  # PROFDISABLE
             b = self.policy.pop()
-            logging.debug(f"Evicting {b.name} ({b.key})")
+            logging.debug(f"Evicting {b.name} ({b.key})")  # PROFDISABLE
 
             if b.dirty:
-                updateProf('s_devDWriteBack', b.size())
+                updateProf('s_devDWriteBack', b.size())  # PROFDISABLE
                 b.toHost()
 
             assert b.onDevice
@@ -427,18 +432,18 @@ class bufferCache():
         for bSpec in bSpecs:
             cacheBuf = self.bufs.get(bSpec.key, None)
             if cacheBuf is None:
-                updateProf('n_devDMiss', 1)
+                updateProf('n_devDMiss', 1)  # PROFDISABLE
                 total += bSpec.size
             else:
-                if cacheBuf.onDevice:
-                    updateProf('n_devDHit', 1)
-                else:
-                    updateProf('n_devDMiss', 1)
+                if not cacheBuf.onDevice:
+                    updateProf('n_devDMiss', 1)  # PROFDISABLE
                     total += bSpec.size
+                else:  # PROFDISABLE
+                    updateProf('n_devDHit', 1)  # PROFDISABLE
 
-        pstart = startTimer()
+        pstart = startTimer()  # PROFDISABLE
         self.makeRoom(total)
-        updateTimer('t_devDEvict', pstart, final=False)
+        updateTimer('t_devDEvict', pstart, final=False)  # PROFDISABLE
 
     def load(self, bSpec, overwrite=False, clientID=None):
         """Load a buffer onto the device, fetching from the KV store if
@@ -459,14 +464,14 @@ class bufferCache():
 
         buf = self.bufs.get(bID, None)
         if buf is None:
-            updateProf('n_hostDMiss', 1)
+            updateProf('n_hostDMiss', 1)  # PROFDISABLE
             if bSpec.ephemeral or overwrite:
-                logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{bSpec.size}")
+                logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{bSpec.size}")  # PROFDISABLE
                 hbuf = None
             else:
                 #XXX need to track repeated keys so we don't store a million copies of the same buffer (this could be serious for things like BERT where the aggregate constant size is huge and it has many constants).
                 hbuf = self.kv.get(bSpec.key)
-                logging.debug(f"Loading buffer from KV: bID:{bID}, name:{bSpec.name}, size:{len(hbuf)}, key:{bSpec.key}")
+                logging.debug(f"Loading buffer from KV: bID:{bID}, name:{bSpec.name}, size:{len(hbuf)}, key:{bSpec.key}")  # PROFDISABLE
 
             buf = kaasBuf.fromSpec(bID, bSpec, src=hbuf)
 
@@ -476,18 +481,18 @@ class bufferCache():
             self.bufs[bID] = buf
         else:
             if buf.key != bSpec.key and not (bSpec.ephemeral or overwrite):
-                logging.debug(f"Loading new value into buffer {bID} from key {bSpec.key}")
-                updateProf('n_hostDMiss', 1)
+                logging.debug(f"Loading new value into buffer {bID} from key {bSpec.key}")  # PROFDISABLE
+                updateProf('n_hostDMiss', 1)  # PROFDISABLE
 
-                pstart = startTimer()
+                pstart = startTimer()  # PROFDISABLE
                 hbuf = self.kv.get(bSpec.key)
-                updateTimer('t_hostDLoad', pstart, final=False)
+                updateTimer('t_hostDLoad', pstart, final=False)  # PROFDISABLE
 
                 buf.updateValue(hbuf)
-                updateProf('s_hostDLoad', buf.size)
-            else:
-                updateProf('n_hostDHit', 1)
-                logging.debug(f"Re-using cached buffer {bID}")
+                updateProf('s_hostDLoad', buf.size)  # PROFDISABLE
+            else:  # PROFDISABLE
+                updateProf('n_hostDHit', 1)  # PROFDISABLE
+                logging.debug(f"Re-using cached buffer {bID}")  # PROFDISABLE
 
             # Pin the buffer in memory by removing it from the eviction policy.
             # release() will place it back in the policy.
@@ -520,11 +525,11 @@ class bufferCache():
             if not buf.ephemeral:
                 # Data are stored as numpy arrays because memoryviews can't be
                 # pickled. This should still be zero copy.
-                logging.debug("Writing back to kv: {} (key: {})".format(buf.name, buf.key))
-                updateProf('n_hostDWriteBack', 1)
-                pstart = startTimer()
+                logging.debug("Writing back to kv: {} (key: {})".format(buf.name, buf.key))  # PROFDISABLE
+                updateProf('n_hostDWriteBack', 1)  # PROFDISABLE
+                pstart = startTimer()  # PROFDISABLE
                 self.kv.put(buf.key, buf.hbuf, profile=getProf(mod='kv'), profFinal=False)
-                updateTimer('t_hostDWriteBack', pstart, final=False)
+                updateTimer('t_hostDWriteBack', pstart, final=False)  # PROFDISABLE
             buf.dirty = False
 
     def flush(self):
@@ -591,9 +596,9 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
     # We try to help the cuda memory allocator out by freeing all the buffers
     # at once instead of mixing frees and mallocs at a fine-grain. This loop
     # finds all the unique buffers in the request
-    pstart = startTimer()
+    pstart = startTimer()  # PROFDISABLE
     bCache.makeRoomForBufs(req.bufferMap.values())
-    updateTimer('t_makeRoom', pstart, final=False)
+    updateTimer('t_makeRoom', pstart, final=False)  # PROFDISABLE
 
     invokeTimes = []
     visibleOutputs = []
@@ -605,18 +610,18 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
 
     for i in range(req.nIter):
         for kSpec in req.kernels:
-            updateProf('n_invoke', 1)
+            updateProf('n_invoke', 1)  # PROFDISABLE
             kern = kCache.get(kSpec)
 
             arguments = []
             for argName, ioType in zip(kSpec.arguments, kSpec.ioTypes):
                 arg = req.bufferMap[argName]
-                pstart = startTimer()
+                pstart = startTimer()  # PROFDISABLE
                 if ioType == 'o':
                     argBuf = bCache.load(arg, overwrite=True, clientID=clientID)
                 else:
                     argBuf = bCache.load(arg, clientID=clientID)
-                updateTimer('t_setupArgs', pstart, final=False)
+                updateTimer('t_setupArgs', pstart, final=False)  # PROFDISABLE
 
                 if (ioType == 'o' or ioType == 'io') and not argBuf.ephemeral:
                     bCache.dirty(argBuf.bID)
@@ -624,11 +629,11 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
 
                 arguments.append(argBuf)
 
-            pstart = startTimer()
+            pstart = startTimer()  # PROFDISABLE
             timer = kern.Invoke(kSpec.literals, arguments,
                                 kSpec.gridDim, kSpec.blockDim, kSpec.sharedSize)
-            profSync()
-            updateTimer('t_invokeExternal', pstart, final=False)
+            profSync()  # PROFDISABLE
+            updateTimer('t_invokeExternal', pstart, final=False)  # PROFDISABLE
             invokeTimes.append(timer)
 
             for buf in arguments:
