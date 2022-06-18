@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 import ray
 import kaas.pool
+from pprint import pprint
 
 
 @ray.remote
@@ -85,6 +86,8 @@ def testProfs(policy):
 
     profs = pool.getProfile()
 
+    #XXX
+    pprint(profs.report())
     poolGroups = set([k for k, v in profs.mod('pool').mod('groups').getMods()])
     workerGroups = set([k for k, v in profs.mod('workers').mod('groups').getMods()])
     if not set(groups) <= poolGroups or \
@@ -125,7 +128,6 @@ if __name__ == "__main__":
     #
     print("Profiling Test")
     if not testProfs(kaas.pool.policies.BALANCE):
-    # if not testProfs(kaas.pool.policies.EXCLUSIVE):
         print("FAIL")
     else:
         print("SUCCESS")

@@ -8,8 +8,8 @@ import os
 import time
 
 from . import cutlass
-
 from . import complexCutlass
+from . import kaas
 
 # NOTE on the PROFDISABLE comments: I hacked up a way to disable all the
 # cumbersome profiling and debugging code as needed. Even with python-level
@@ -385,7 +385,6 @@ class bufferCache():
         # Contains all bufs, on device or not
         self.bufs = {}
         self.dirtyBufs = {}
-        self.ephemerals = {}
 
         self.policy = lruPolicy()
 
@@ -469,14 +468,13 @@ class bufferCache():
                 logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{bSpec.size}")  # PROFDISABLE
                 hbuf = None
             else:
-                #XXX need to track repeated keys so we don't store a million copies of the same buffer (this could be serious for things like BERT where the aggregate constant size is huge and it has many constants).
+                # XXX need to track repeated keys so we don't store a million copies of the same buffer (this could be serious for things like BERT where the aggregate constant size is huge and it has many constants).
+                pstart = startTimer()  # PROFDISABLE
                 hbuf = self.kv.get(bSpec.key)
+                updateTimer('t_hostDLoad', pstart, final=False)  # PROFDISABLE
                 logging.debug(f"Loading buffer from KV: bID:{bID}, name:{bSpec.name}, size:{len(hbuf)}, key:{bSpec.key}")  # PROFDISABLE
 
             buf = kaasBuf.fromSpec(bID, bSpec, src=hbuf)
-
-            if bSpec.ephemeral:
-                self.ephemerals[bID] = buf
 
             self.bufs[bID] = buf
         else:
@@ -513,23 +511,22 @@ class bufferCache():
         buf.useCount += 1
         self.policy.push(buf)
 
-    def dirty(self, bID):
-        buf = self.bufs[bID]
+    def dirty(self, buf):
         buf.dirty = True
-        self.dirtyBufs[bID] = buf
+        self.dirtyBufs[buf.bID] = buf
 
     def _flushOne(self, buf):
         if buf.dirty:
             if buf.onDevice:
                 buf.toHost()
-            if not buf.ephemeral:
-                # Data are stored as numpy arrays because memoryviews can't be
-                # pickled. This should still be zero copy.
-                logging.debug("Writing back to kv: {} (key: {})".format(buf.name, buf.key))  # PROFDISABLE
-                updateProf('n_hostDWriteBack', 1)  # PROFDISABLE
-                pstart = startTimer()  # PROFDISABLE
-                self.kv.put(buf.key, buf.hbuf, profile=getProf(mod='kv'), profFinal=False)
-                updateTimer('t_hostDWriteBack', pstart, final=False)  # PROFDISABLE
+
+            # Data are stored as numpy arrays because memoryviews can't be
+            # pickled. This should still be zero copy.
+            logging.debug("Writing back to kv: {} (key: {})".format(buf.name, buf.key))  # PROFDISABLE
+            updateProf('n_hostDWriteBack', 1)  # PROFDISABLE
+            pstart = startTimer()  # PROFDISABLE
+            self.kv.put(buf.key, buf.hbuf, profile=getProf(mod='kv'), profFinal=False)
+            updateTimer('t_hostDWriteBack', pstart, final=False)  # PROFDISABLE
             buf.dirty = False
 
     def flush(self):
@@ -553,8 +550,6 @@ class bufferCache():
 
         if buf.dirty:
             self.dirtyBufs.pop(buf.key, None)
-        if buf.ephemeral:
-            self.ephemerals.pop(buf.key, None)
 
         del self.bufs[buf.key]
 
@@ -600,6 +595,12 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
     bCache.makeRoomForBufs(req.bufferMap.values())
     updateTimer('t_makeRoom', pstart, final=False)  # PROFDISABLE
 
+    # Pre-fetch all the arguments, this is important for iterative algorithms
+    # that would have to do this on every iteration
+    pstart = startTimer()  # PROFDISABLE
+    reqBufs = {name: bCache.load(arg, clientID=clientID) for name, arg in req.bufferMap.items()}
+    updateTimer('t_setupArgs', pstart, final=False)  # PROFDISABLE
+
     invokeTimes = []
     visibleOutputs = []
 
@@ -615,17 +616,10 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
 
             arguments = []
             for argName, ioType in zip(kSpec.arguments, kSpec.ioTypes):
-                arg = req.bufferMap[argName]
-                pstart = startTimer()  # PROFDISABLE
-                if ioType == 'o':
-                    argBuf = bCache.load(arg, overwrite=True, clientID=clientID)
-                else:
-                    argBuf = bCache.load(arg, clientID=clientID)
-                updateTimer('t_setupArgs', pstart, final=False)  # PROFDISABLE
+                argBuf = reqBufs[argName]
 
-                if (ioType == 'o' or ioType == 'io') and not argBuf.ephemeral:
-                    bCache.dirty(argBuf.bID)
-                    visibleOutputs[argBuf.key] = None
+                if ioType == 'o':
+                    visibleOutputs[argBuf.key] = argBuf
 
                 arguments.append(argBuf)
 
@@ -636,8 +630,11 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
             updateTimer('t_invokeExternal', pstart, final=False)  # PROFDISABLE
             invokeTimes.append(timer)
 
-            for buf in arguments:
-                bCache.release(buf)
+    for buf in reqBufs.values():
+        bCache.release(buf)
+
+    for buf in visibleOutputs.values():
+        bCache.dirty(buf)
 
     # Make sure all outputs are visible externally (basically this merges our
     # private state into whatever consistency properties the KV gives us.

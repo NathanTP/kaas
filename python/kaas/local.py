@@ -1,7 +1,7 @@
 from . import profiling
 import cloudpickle as pickle
 import copy
-from . import _server_prof as _server
+from . import _server
 
 
 class KVKeyError(Exception):
@@ -83,10 +83,10 @@ def init():
     _server.initServer()
 
 
-def invoke(rawReq, kv, stats=None):
-    with profiling.timer("t_e2e", stats):
+def invoke(rawReq, kv, profs=None):
+    with profiling.timer("t_e2e", profs):
         req = rawReq[0]
         renameMap = rawReq[1]
         req.reKey(renameMap)
 
-        return tuple(_server.kaasServeInternal(req, kv, stats))
+        return tuple(_server.kaasServeInternal(req, kv, profs))
