@@ -97,10 +97,10 @@ def invoke(rawReq, stats=None, clientID=None):
 
 @ray.remote(num_gpus=1)
 class invokerActor(pool.PoolWorker):
-    def __init__(self):
+    def __init__(self, **kwargs):
         """invokerActor is the ray version of a kaas worker, it is assigned a
         single GPU and supports requests from multiple clients."""
-        super().__init__()
+        super().__init__(**kwargs)
         init()
 
         # {clientID -> profiling.profCollection}
@@ -115,12 +115,9 @@ class invokerActor(pool.PoolWorker):
         """Invoke the kaasReq req on this actor. You may optionally pass a
         clientID. clientIDs are used for per-client profiling and may affect
         scheduling/caching policies."""
-        # if clientID not in self.stats:
-        #     self.stats[clientID] = profiling.profCollection()
-
-        clientProfs = self.profs.mod(clientID)
-        with profiling.timer('t_e2e', clientProfs):
-            res = invoke(req, clientProfs)
+        profs = self.getProfs()
+        with profiling.timer('t_e2e', profs):
+            res = invoke(req, profs)
 
         return res
 

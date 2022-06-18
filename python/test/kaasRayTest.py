@@ -6,6 +6,7 @@ import kaas.pool
 import ray
 import pathlib
 import numpy as np
+from pprint import pprint
 
 testPath = pathlib.Path(__file__).resolve().parent
 
@@ -36,7 +37,6 @@ def checkSum(resArray, testArray):
         print("\tGot: ", got)
         return False
     else:
-        print("PASS")
         return True
 
 
@@ -91,7 +91,6 @@ def checkDot(got, aArr, bArr):
         print("\tGot: ", got)
         return False
     else:
-        print("PASS")
         return True
 
 
@@ -105,7 +104,7 @@ def testMinimal():
     # returning a reference to the output of the kaas req (kaasOutRef). We
     # finally dereference this to get the actual array (resArray).
     kaasOutRef = ray.get(taskResRef)
-    resArray = ray.get(kaasOutRef)
+    resArray = ray.get(kaasOutRef[0])
     resArray.dtype = np.uint32
 
     return checkDot(resArray[0], inputArrs[0], inputArrs[1])
@@ -135,9 +134,11 @@ def testPool():
         return False
 
     profs = pool.getProfile().report(metrics=['mean'])
-    if 'testClient' not in profs or 't_invoke' not in profs['testClient']:
+    if 'testClient' not in profs['pool']['groups'] \
+       or 'testClient' not in profs['workers']['groups'] \
+       or 't_e2e' not in profs['workers']['groups']['testClient']:
         print("Profile missing data:")
-        print(profs)
+        pprint(profs)
         return False
 
     return True
@@ -146,8 +147,14 @@ def testPool():
 if __name__ == "__main__":
     ray.init()
 
-    # print("Minimal test")
-    # testMinimal()
+    print("Minimal test")
+    if testMinimal():
+        print("PASS")
+    else:
+        print("FAIL")
 
     print("Pool Test")
-    testPool()
+    if testPool():
+        print("PASS")
+    else:
+        print("FAIL")
