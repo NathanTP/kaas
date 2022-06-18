@@ -39,7 +39,7 @@ class bufferSpec():
             offset - offset within the object to start reading from
             key - For non-epehemeral buffers, this is the key in the kv store
                   to use. If key is not specified, name is used as the key.
-            epehemeral - If true, this buffer does not interact with the KV store
+            epehemeral - If true, this buffer should not be read from the KV store
             const - If true, this buffer is guaranteed to never change in the KV store
         """
         self.name = name
@@ -159,7 +159,6 @@ class kernelSpec():
         self.type_list = []
         self.inputs = []
         self.outputs = []
-        self.temps = []
         for i in range(len(arguments)):
             arg = arguments[i]
             self.arguments.append(arg[0])
@@ -168,8 +167,6 @@ class kernelSpec():
                 self.inputs.append(arg[0])
             if 'o' in arg[1]:
                 self.outputs.append(arg[0])
-            if 't' in arg[1]:
-                self.temps.append(arg[0])
 
         # Some outputs are also inputs, uniqueOutputs are just the new buffers
         # that have to be created for outputs
@@ -189,7 +186,6 @@ class kernelSpec():
         d['arguments'] = [a.toDict() for a in self.arguments]
         d['type_list'] = [i for i in self.type_list]
         d['inputs'] = [b.toDict() for b in self.inputs]
-        d['temps'] = [b.toDict() for b in self.temps]
         d['outputs'] = [b.toDict() for b in self.outputs]
         return d
 

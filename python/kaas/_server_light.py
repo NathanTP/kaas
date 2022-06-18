@@ -8,8 +8,15 @@ import os
 import time
 
 from . import cutlass
-
 from . import complexCutlass
+from . import kaas
+
+# NOTE on the PROFDISABLE comments: I hacked up a way to disable all the
+# cumbersome profiling and debugging code as needed. Even with python-level
+# disabling (e.g. "if profLevel > 0"), things can really slow down. Any line
+# with a "#  PROFDISABLE" comment will be deleted in light mode. This is a
+# source-level transformation so make sure the code works with those lines
+# literally deleted. Use ./lightenServer.sh to create _server_light.py.
 
 # logLevel = logging.ERROR
 logLevel = logging.ERROR
@@ -338,7 +345,6 @@ class bufferCache():
         # Contains all bufs, on device or not
         self.bufs = {}
         self.dirtyBufs = {}
-        self.ephemerals = {}
 
         self.policy = lruPolicy()
 
@@ -411,13 +417,10 @@ class bufferCache():
             if bSpec.ephemeral or overwrite:
                 hbuf = None
             else:
-                #XXX need to track repeated keys so we don't store a million copies of the same buffer (this could be serious for things like BERT where the aggregate constant size is huge and it has many constants).
+                # XXX need to track repeated keys so we don't store a million copies of the same buffer (this could be serious for things like BERT where the aggregate constant size is huge and it has many constants).
                 hbuf = self.kv.get(bSpec.key)
 
             buf = kaasBuf.fromSpec(bID, bSpec, src=hbuf)
-
-            if bSpec.ephemeral:
-                self.ephemerals[bID] = buf
 
             self.bufs[bID] = buf
         else:
@@ -446,19 +449,18 @@ class bufferCache():
         buf.useCount += 1
         self.policy.push(buf)
 
-    def dirty(self, bID):
-        buf = self.bufs[bID]
+    def dirty(self, buf):
         buf.dirty = True
-        self.dirtyBufs[bID] = buf
+        self.dirtyBufs[buf.bID] = buf
 
     def _flushOne(self, buf):
         if buf.dirty:
             if buf.onDevice:
                 buf.toHost()
-            if not buf.ephemeral:
-                # Data are stored as numpy arrays because memoryviews can't be
-                # pickled. This should still be zero copy.
-                self.kv.put(buf.key, buf.hbuf, profile=getProf(mod='kv'), profFinal=False)
+
+            # Data are stored as numpy arrays because memoryviews can't be
+            # pickled. This should still be zero copy.
+            self.kv.put(buf.key, buf.hbuf, profile=getProf(mod='kv'), profFinal=False)
             buf.dirty = False
 
     def flush(self):
@@ -482,8 +484,6 @@ class bufferCache():
 
         if buf.dirty:
             self.dirtyBufs.pop(buf.key, None)
-        if buf.ephemeral:
-            self.ephemerals.pop(buf.key, None)
 
         del self.bufs[buf.key]
 
@@ -527,6 +527,10 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
     # finds all the unique buffers in the request
     bCache.makeRoomForBufs(req.bufferMap.values())
 
+    # Pre-fetch all the arguments, this is important for iterative algorithms
+    # that would have to do this on every iteration
+    reqBufs = {name: bCache.load(arg, clientID=clientID) for name, arg in req.bufferMap.items()}
+
     invokeTimes = []
     visibleOutputs = []
 
@@ -541,15 +545,10 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
 
             arguments = []
             for argName, ioType in zip(kSpec.arguments, kSpec.ioTypes):
-                arg = req.bufferMap[argName]
-                if ioType == 'o':
-                    argBuf = bCache.load(arg, overwrite=True, clientID=clientID)
-                else:
-                    argBuf = bCache.load(arg, clientID=clientID)
+                argBuf = reqBufs[argName]
 
-                if (ioType == 'o' or ioType == 'io') and not argBuf.ephemeral:
-                    bCache.dirty(argBuf.bID)
-                    visibleOutputs[argBuf.key] = None
+                if ioType == 'o':
+                    visibleOutputs[argBuf.key] = argBuf
 
                 arguments.append(argBuf)
 
@@ -557,8 +556,11 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
                                 kSpec.gridDim, kSpec.blockDim, kSpec.sharedSize)
             invokeTimes.append(timer)
 
-            for buf in arguments:
-                bCache.release(buf)
+    for buf in reqBufs.values():
+        bCache.release(buf)
+
+    for buf in visibleOutputs.values():
+        bCache.dirty(buf)
 
     # Make sure all outputs are visible externally (basically this merges our
     # private state into whatever consistency properties the KV gives us.

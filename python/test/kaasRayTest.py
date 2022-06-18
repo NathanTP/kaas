@@ -8,6 +8,8 @@ import pathlib
 import numpy as np
 from pprint import pprint
 
+from kaas import profiling
+
 testPath = pathlib.Path(__file__).resolve().parent
 
 
@@ -16,7 +18,7 @@ def getSumReq(arrLen):
     inpRef = ray.put(testArray)
 
     args = [(kaas.bufferSpec(kaas.ray.putObj(inpRef), testArray.nbytes), 'i'),
-            (kaas.bufferSpec('out', 4, ephemeral=False), 'o')]
+            (kaas.bufferSpec('out', 4, ephemeral=True), 'o')]
 
     kern = kaas.kernelSpec(testPath / 'kerns' / 'testKerns.cubin',
                            'sumKern',
@@ -40,7 +42,7 @@ def checkSum(resArray, testArray):
         return True
 
 
-def getDotReq(nElem, offset=False):
+def getDotReq(nElem, offset=False, nIter=1):
     nByte = nElem*4
 
     aArr = np.arange(0, nElem, dtype=np.uint32)
@@ -60,9 +62,9 @@ def getDotReq(nElem, offset=False):
         inpRefs = [aRef, bRef]
 
     prodOutBuf = kaas.bufferSpec('prodOut', nByte, ephemeral=True)
-    cBuf = kaas.bufferSpec('output', 8, key='c')
+    cBuf = kaas.bufferSpec('output', 8, key='c', ephemeral=True)
 
-    args_prod = [(aBuf, 'i'), (bBuf, 'i'), (prodOutBuf, 'o')]
+    args_prod = [(aBuf, 'i'), (bBuf, 'i'), (prodOutBuf, 't')]
 
     prodKern = kaas.kernelSpec(testPath / 'kerns' / 'testKerns.cubin',
                                'prodKern',
@@ -77,7 +79,7 @@ def getDotReq(nElem, offset=False):
                               (1, 1), (nElem // 2, 1, 1),
                               arguments=args_sum)
 
-    req = kaas.kaasReq([prodKern, sumKern])
+    req = kaas.kaasReq([prodKern, sumKern], nIter=nIter)
     reqRef = ray.put(req)
 
     return reqRef, inpRefs, [aArr, bArr]
@@ -107,6 +109,24 @@ def testMinimal():
     resArray = ray.get(kaasOutRef[0])
     resArray.dtype = np.uint32
 
+    return checkDot(resArray[0], inputArrs[0], inputArrs[1])
+
+
+def stressIterative():
+    nIter = 3000
+    reqRef, _, inputArrs = getDotReq(1024, offset=True, nIter=nIter)
+
+    profs = profiling.profCollection()
+    taskResRef = kaas.ray.invokerTask.remote((reqRef, {}), profs=profs)
+
+    # taskResRef is the reference returned by the kaas worker task. The task is
+    # returning a reference to the output of the kaas req (kaasOutRef). We
+    # finally dereference this to get the actual array (resArray).
+    kaasOutRef, profs = ray.get(taskResRef)
+    resArray = ray.get(kaasOutRef[0])
+    resArray.dtype = np.uint32
+
+    pprint(profs.report(metrics=['mean']))
     return checkDot(resArray[0], inputArrs[0], inputArrs[1])
 
 
@@ -147,14 +167,20 @@ def testPool():
 if __name__ == "__main__":
     ray.init()
 
-    print("Minimal test")
-    if testMinimal():
+    print("Stress Iterative")
+    if stressIterative():
         print("PASS")
     else:
         print("FAIL")
 
-    print("Pool Test")
-    if testPool():
-        print("PASS")
-    else:
-        print("FAIL")
+    # print("Minimal test")
+    # if testMinimal():
+    #     print("PASS")
+    # else:
+    #     print("FAIL")
+
+    # print("Pool Test")
+    # if testPool():
+    #     print("PASS")
+    # else:
+    #     print("FAIL")

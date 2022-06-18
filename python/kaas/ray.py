@@ -56,7 +56,7 @@ def putObj(obj):
 reqCache = {}
 
 
-def invoke(rawReq, stats=None, clientID=None):
+def invoke(rawReq, profs=None, clientID=None):
     """Handle a single KaaS request in the current thread/actor/task. GPU state
     is cached and no attempt is made to be polite in sharing the GPU. The user
     should ensure that the only GPU-enabled functions running are
@@ -74,10 +74,10 @@ def invoke(rawReq, stats=None, clientID=None):
     Returns: tuple (i.e. multiple returns) of references to output objects
     """
     kv = _rayKV()
-    with profiling.timer('t_e2e', stats):
+    with profiling.timer('t_e2e', profs):
         reqRef = rawReq[0]
         renameMap = rawReq[1]
-        with profiling.timer("t_parse_request", stats):
+        with profiling.timer("t_parse_request", profs):
             if reqRef in reqCache:
                 req = reqCache[reqRef]
             else:
@@ -86,7 +86,7 @@ def invoke(rawReq, stats=None, clientID=None):
 
             req.reKey(renameMap)
 
-        visibleOutputs = _server.kaasServeInternal(req, kv, stats, clientID=clientID)
+        visibleOutputs = _server.kaasServeInternal(req, kv, profs, clientID=clientID)
 
     returns = []
     for outKey in visibleOutputs:
@@ -117,16 +117,20 @@ class invokerActor(pool.PoolWorker):
         scheduling/caching policies."""
         profs = self.getProfs()
         with profiling.timer('t_e2e', profs):
-            res = invoke(req, profs)
+            res = invoke(req, profs=profs)
 
         return res
 
 
 @ray.remote(num_gpus=1)
-def invokerTask(req):
+def invokerTask(req, profs=None):
     """Handle a single KaaS request as a ray task. This isn't the recommended
     way to use kaas (it is intended for persistent allocations like actors),
     but it can be useful from time to time."""
     init()
 
-    return invoke(req)
+    rets = invoke(req, profs=profs)
+    if profs is None:
+        return rets
+    else:
+        return rets, profs
