@@ -1,7 +1,8 @@
 #!/usr/bin/env python
 import ray
 import kaas.pool
-from pprint import pprint
+from pprint import pprint  # NOQA
+import argparse
 
 
 @ray.remote
@@ -86,8 +87,6 @@ def testProfs(policy):
 
     profs = pool.getProfile()
 
-    #XXX
-    pprint(profs.report())
     poolGroups = set([k for k, v in profs.mod('pool').mod('groups').getMods()])
     workerGroups = set([k for k, v in profs.mod('workers').mod('groups').getMods()])
     if not set(groups) <= poolGroups or \
@@ -99,35 +98,41 @@ def testProfs(policy):
     return True
 
 
+POLICY = kaas.pool.policies.EXCLUSIVE
+
 if __name__ == "__main__":
+    availableTests = ['oneRet', 'multiRet', 'profiling']
+
+    parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
+    parser.add_argument('-t', '--test', action='append', choices=availableTests)
+    parser.add_argument('-p', '--policy', choices=['balance', 'exclusive'] + ['all'])
+
+    args = parser.parse_args()
+
     ray.init()
 
-    # print("Single Return BalancePolicy")
-    # if not testOneRet(kaas.pool.policies.BALANCE):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
-    #
-    # print("Reference Argument BalancePolicy")
-    # if not testOneRet(kaas.pool.policies.BALANCE, inputRef=True):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
-    #
-    # print("Min test ExclusivePolicy")
-    # if not testOneRet(kaas.pool.policies.EXCLUSIVE):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
-    #
-    # print("Multiple Returns")
-    # if not testMultiRet(kaas.pool.policies.BALANCE):
-    #     print("FAIL")
-    # else:
-    #     print("SUCCESS")
-    #
-    print("Profiling Test")
-    if not testProfs(kaas.pool.policies.BALANCE):
-        print("FAIL")
+    if args.policy == 'balance':
+        policy = kaas.pool.policies.BALANCE
+    elif args.policy == 'exclusive':
+        policy = kaas.pool.policies.EXCLUSIVE
+
+    if args.test == 'all':
+        tests = availableTests
     else:
-        print("SUCCESS")
+        tests = args.test
+
+    for test in tests:
+        print(f"Running with {args.policy}: {test}")
+        if test == 'oneRet':
+            ret = testOneRet(policy)
+        elif test == 'multiRet':
+            ret = testMultiRet(policy)
+        elif test == 'profiling':
+            ret = testProfs(policy)
+        else:
+            raise ValueError("Unrecognized test: ", test)
+
+        if not ret:
+            print('FAIL')
+        else:
+            print('SUCCESS')
