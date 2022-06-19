@@ -1,8 +1,10 @@
 #!/usr/bin/env python
 import ray
-import kaas.pool
 from pprint import pprint  # NOQA
 import argparse
+import time
+
+import kaas.pool
 
 
 @ray.remote
@@ -20,8 +22,13 @@ class TestWorker(kaas.pool.PoolWorker):
         self.getProfs()['n_returnTwo'].increment(1)
         return True, arg
 
+    def delay(self, arg, sleepTime):
+        time.sleep(sleepTime)
+        return arg
+
 
 def testMultiRet(policy):
+    success = True
     groupID = "exampleGroup"
     pool = kaas.pool.Pool(3, policy=policy)
     pool.registerGroup(groupID, TestWorker)
@@ -37,17 +44,22 @@ def testMultiRet(policy):
         success = ray.get(retRef[0])
         if not isinstance(success, bool) or not success:
             print("Test Failed: returned wrong first value expected True, got ", success)
-            return False
+            success = False
+            break
 
         val = ray.get(retRef[1])
         if expect != val:
             print(f"Test Failed: returned wrong second value expected '{expect}', got '{val}'")
-            return False
+            success = False
+            break
 
-    return True
+    pool.shutdown()
+
+    return success
 
 
 def testOneRet(policy, inputRef=False):
+    success = True
     groupID = "exampleGroup"
     pool = kaas.pool.Pool(3, policy=policy)
     pool.registerGroup(groupID, TestWorker)
@@ -67,12 +79,50 @@ def testOneRet(policy, inputRef=False):
         ret = ray.get(retRef)
         if expect != ret:
             print(f"Test Failed: expected '{expect}', got '{ret}'")
-            return False
+            success = False
 
-    return True
+    pool.shutdown()
+
+    return success
+
+
+def testStress(policy):
+    """Submit many requests from many groups in one batch and wait for returns.
+    There are more groups than workers and many requests interleaved between
+    groups so this should stress the pool."""
+    success = True
+    pool = kaas.pool.Pool(3, policy=policy)
+
+    groups = ['g0', 'g1', 'g2', 'g3', 'g4']
+    for group in groups:
+        pool.registerGroup(group, TestWorker)
+
+    retRefs = []
+    args = []
+    for iterIdx in range(10):
+        for groupIdx, group in enumerate(groups):
+            arg = iterIdx*100 + groupIdx
+            retRefs.append(pool.run(group, 'delay', args=[arg, 1]))
+            args.append(arg)
+
+    rets = ray.get(ray.get(retRefs))
+    for idx, ret, arg in zip(range(len(rets)), rets, args):
+        if ret != arg:
+            print(f"Unexpected return from call {idx}: ")
+            print("\tExpected: ", arg)
+            print("\tGot: ", ret)
+            success = False
+            break
+
+    profs = pool.getProfile()
+    print(profs)
+
+    pool.shutdown()
+    return success
 
 
 def testProfs(policy):
+    success = True
     pool = kaas.pool.Pool(3, policy=policy)
 
     groups = ['group0', 'group1']
@@ -93,15 +143,16 @@ def testProfs(policy):
        not set(groups) <= workerGroups:
         print("Failure: missing groups")
         print(profs)
-        return False
+        success = False
 
-    return True
+    pool.shutdown()
+    return success
 
 
 POLICY = kaas.pool.policies.EXCLUSIVE
 
 if __name__ == "__main__":
-    availableTests = ['oneRet', 'multiRet', 'profiling']
+    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress']
 
     parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
     parser.add_argument('-t', '--test', action='append', choices=availableTests)
@@ -129,6 +180,8 @@ if __name__ == "__main__":
             ret = testMultiRet(policy)
         elif test == 'profiling':
             ret = testProfs(policy)
+        elif test == 'stress':
+            ret = testStress(policy)
         else:
             raise ValueError("Unrecognized test: ", test)
 

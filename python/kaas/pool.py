@@ -6,7 +6,14 @@ import collections
 import abc
 import enum
 import concurrent
+import itertools
+import logging
+
 from . import profiling
+
+# logLevel = logging.DEBUG
+logLevel = logging.WARN
+logging.basicConfig(format="pool-%(levelname)s: %(message)s", level=logLevel)
 
 
 PoolReq = collections.namedtuple('PoolReq', ['groupID', 'fName', 'num_returns', 'args', 'kwargs', 'resFuture'])
@@ -93,6 +100,10 @@ class PoolWorker():
                 return latestProfs
         except AttributeError:
             raise PoolError("PoolWorkers must call super().__init__() in order to use profiling")
+
+    def _shutdown(self):
+        """Will finish any pending work and then exit gracefully"""
+        ray.actor.exit_actor()
 
 
 class Policy(abc.ABC):
@@ -216,14 +227,14 @@ class BalancePolicy(Policy):
             while len(self.freeWorkers) > 0 and delta > 0:
                 _, toKill = self.freeWorkers.popitem()
                 self.pendingProfs.append(toKill._getProfile.remote())
-                toKill.terminate.remote()
+                toKill._shutdown.remote()
                 delta -= 1
 
             # next take from busy pool
             while delta > 0:
                 wID, toKill = self.busyWorkers.popitem()
                 self.pendingProfs.append(toKill._getProfile.remote())
-                toKill.terminate.remote()
+                toKill._shutdown.remote()
                 self.deadWorkers[wID] = toKill
                 delta -= 1
         else:
@@ -256,7 +267,7 @@ class BalancePolicy(Policy):
         if self.workerClass is None:
             raise PoolError("No groups have been registered!")
 
-        if self.maxWorkers == 0:
+        if len(reqs) != 0 and self.maxWorkers == 0:
             raise PoolError("Requested worker but maxWorkers==0")
 
         for wID in completedWorkers:
@@ -310,6 +321,16 @@ class BalancePolicy(Policy):
         self.initProfs()
 
         return latestProfs
+
+    def shutdown(self):
+        self.freeWorkers = {}  # ready to recieve a request
+        self.busyWorkers = {}  # currently running a request
+        self.deadWorkers = {}  # finishing up its last request
+        confirmations = []
+        for worker in itertools.chain(self.freeWorkers.values(), self.busyWorkers.values()):
+            confirmations.append(worker._shutdown.remote())
+
+        ray.wait([confirmations], num_returns=len(confirmations))
 
 
 class ExclusivePolicy(Policy):
@@ -444,18 +465,27 @@ class Pool():
             nGPUs: Number of GPUs to assign to each worker. Pool does not
                    currently support per-group nGPUs.
         """
+        self.profile = None
+        self.dead = False
+
         self.pool = _PoolActor.remote(maxWorkers, policy=policy, nGPUs=nGPUs, profLevel=profLevel)
 
     def registerGroup(self, groupID, workerClass: PoolWorker):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run().
         """
+        if self.dead:
+            raise PoolError("Pool has been shutdown")
+
         registerConfirm = self.pool.registerGroup.remote(groupID, workerClass)
         ray.get(registerConfirm)
 
     def registerGroupAsync(self, groupID, workerClass: PoolWorker):
         """Like registerGroup() but returns immediately with a reference that
         must be waited on before sending requests for this group."""
+        if self.dead:
+            raise PoolError("Pool has been shutdown")
+
         return self.pool.registerGroup.remote(groupID, workerClass)
 
     def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None, refDeps=None):
@@ -476,6 +506,9 @@ class Pool():
                 need to dereference twice: once to get the worker return
                 reference(s), and again to get the value of those return(s).
         """
+        if self.dead:
+            raise PoolError("Pool has been shutdown")
+
         return self.pool.run.options(num_returns=num_returns).\
             remote(groupID, methodName, num_returns=num_returns, args=args, kwargs=kwargs, refDeps=refDeps)
 
@@ -487,7 +520,21 @@ class Pool():
         WARNING: The caller must ensure that there is no pending work on the
         pool before calling getProfile(). Calling getProfile() while there are
         outstanding requests will result in undefined behavior."""
-        return ray.get(self.pool.getProfile.remote())
+        if self.dead:
+            return self.profile
+        else:
+            return ray.get(self.pool.getProfile.remote())
+
+    def shutdown(self):
+        """Free any resources associated with this pool. The pool object
+        remains and getProfile() will continue to work, but no other methods
+        will be valid. A pool cannot be restarted. The user is responsible for
+        ensuring that no work is currently pending on the actor, failure to do
+        so results in undefined behavior."""
+        self.profile = ray.get(self.pool.getProfile.remote())
+        self.dead = True
+
+        ray.wait([self.pool.shutdown.remote()], num_returns=1)
 
 
 @ray.remote
@@ -541,7 +588,7 @@ class _PoolActor():
     async def _waitRefs(self, refs):
         await self.asyncioLoop. \
             run_in_executor(self.threadPool,
-                            lambda: ray.wait(refs, fetch_local=False))
+                            lambda: ray.wait(refs, fetch_local=False, num_returns=len(refs)))
 
     # This one uses normal asyncio.wait but it materializes the references
     # which could be slow and wasteful depending on what the references point
@@ -645,6 +692,10 @@ class _PoolActor():
         self.groupProfs = self.profs.mod('groups')
 
         return latestProfs
+
+    async def shutdown(self):
+        self.policy.shutdown()
+        ray.actor.exit_actor()
 
 
 def mergePerGroupStats(base, delta):
