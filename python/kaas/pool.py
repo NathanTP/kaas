@@ -8,11 +8,13 @@ import enum
 import concurrent
 import itertools
 import logging
+import traceback
+from dataclasses import dataclass
 
 from . import profiling
 
-# logLevel = logging.DEBUG
-logLevel = logging.WARN
+logLevel = logging.DEBUG
+# logLevel = logging.WARN
 logging.basicConfig(format="pool-%(levelname)s: %(message)s", level=logLevel)
 
 
@@ -103,7 +105,20 @@ class PoolWorker():
 
     def _shutdown(self):
         """Will finish any pending work and then exit gracefully"""
-        ray.actor.exit_actor()
+        # Since this calls exit_actor, callers must use ray.wait on it to
+        # verify shutdown. Unfortunately
+        # https://github.com/ray-project/ray/issues/25280 means that errors are
+        # hidden. The try/except makes sure something gets printed.
+        try:
+            ray.actor.exit_actor()
+        except ray.exceptions.AsyncioActorExit:
+            # Ray uses an exception for exit_actor() for asyncio actors. I
+            # don't want to put it outside the try/except in case there is a
+            # different internal error in ray.actor.exit_actor()
+            raise
+        except Exception as e:
+            logging.critical("Shutdown failed: " + traceback.format_exc())
+            raise e
 
 
 class Policy(abc.ABC):
@@ -169,6 +184,12 @@ class Policy(abc.ABC):
         pass
 
 
+@dataclass
+class _WorkerState():
+    actor: PoolWorker
+    nOutstanding: int
+
+
 class BalancePolicy(Policy):
     def __init__(self, maxWorkers, profLevel=0, globalGroupID=None):
         """The BalancePolicy balances requests across workers with no affinity
@@ -194,10 +215,9 @@ class BalancePolicy(Policy):
         # References to profiling data from killed workers
         self.pendingProfs = []
 
-        # {workerID: worker actor handle}
+        # {workerID: _WorkerState}
         self.freeWorkers = {}  # ready to recieve a request
         self.busyWorkers = {}  # currently running a request
-        self.deadWorkers = {}  # finishing up its last request
 
         self.pendingReqs = collections.deque()
 
@@ -215,8 +235,10 @@ class BalancePolicy(Policy):
             self.profs['n_cold_start'].increment(delta)
             # scale up
             for i in range(delta):
-                self.freeWorkers[self.nextWID] = self.workerClass.remote(
-                    profLevel=self.profLevel, defaultGroup=self.globalGroupID)
+                worker = self.workerClass.remote(profLevel=self.profLevel,
+                                                 defaultGroup=self.globalGroupID)
+
+                self.freeWorkers[self.nextWID] = _WorkerState(worker, 0)
                 self.nextWID += 1
 
         elif delta < 0:
@@ -224,19 +246,18 @@ class BalancePolicy(Policy):
             self.profs['n_killed'].increment(-delta)
 
             # try free workers first
-            while len(self.freeWorkers) > 0 and delta > 0:
+            while len(self.freeWorkers) > 0 and delta < 0:
                 _, toKill = self.freeWorkers.popitem()
-                self.pendingProfs.append(toKill._getProfile.remote())
-                toKill._shutdown.remote()
-                delta -= 1
+                self.pendingProfs.append(toKill.actor._getProfile.remote())
+                toKill.actor._shutdown.remote()
+                delta += 1
 
             # next take from busy pool
-            while delta > 0:
+            while delta < 0:
                 wID, toKill = self.busyWorkers.popitem()
-                self.pendingProfs.append(toKill._getProfile.remote())
-                toKill._shutdown.remote()
-                self.deadWorkers[wID] = toKill
-                delta -= 1
+                self.pendingProfs.append(toKill.actor._getProfile.remote())
+                toKill.actor._shutdown.remote()
+                delta += 1
         else:
             # don't actually have to scale
             pass
@@ -263,7 +284,13 @@ class BalancePolicy(Policy):
             self.maxWorkers = 0
             self.scale(realMax)
 
-    def update(self, reqs=(), completedWorkers=()):
+    def update(self, reqs=(), completedWorkers=(), force=False):
+        """The balance policy will try to run requests if possible, but if
+        there are no free workers, it may queue them up pending new
+        completions. If force==True, it will submit multiple requests to
+        workers right away. This isn't ideal from a load-balance perspective,
+        but it means that requests are guaranteed to run even if the pool is
+        scaled down."""
         if self.workerClass is None:
             raise PoolError("No groups have been registered!")
 
@@ -272,26 +299,41 @@ class BalancePolicy(Policy):
 
         for wID in completedWorkers:
             doneWorker = self.busyWorkers.pop(wID, None)
+
+            # We don't need to do anything for completions of dead workers
             if doneWorker is not None:
-                self.freeWorkers[wID] = doneWorker
-            else:
-                del self.deadWorkers[wID]
+                doneWorker.nOutstanding -= 1
+                if doneWorker.nOutstanding == 0:
+                    self.freeWorkers[wID] = doneWorker
+                else:
+                    self.busyWorkers[wID] = doneWorker
 
         self.pendingReqs += reqs
 
-        toSchedule = []
-        for i in range(min(len(self.freeWorkers), len(self.pendingReqs))):
-            toSchedule.append(self.pendingReqs.popleft())
+        if force:
+            toSchedule = self.pendingReqs
+            self.pendingReqs = []
+        else:
+            toSchedule = []
+            for i in range(min(len(self.freeWorkers), len(self.pendingReqs))):
+                toSchedule.append(self.pendingReqs.popleft())
 
         newRuns = {}
         for req in toSchedule:
-            wID, worker = self.freeWorkers.popitem()
-            self.busyWorkers[wID] = worker
+            if len(self.freeWorkers) > 0:
+                wID, worker = self.freeWorkers.popitem()
+            else:
+                assert force
+                wID, worker = self.busyWorkers.popitem()
 
-            resRefs = worker._runWithCompletion.options(
+            logging.debug(f"Submitting request for group: {req.groupID}")
+            resRefs = worker.actor._runWithCompletion.options(
                 num_returns=req.num_returns + 1).remote(
                 req.fName, *req.args,
                 groupID=req.groupID, **req.kwargs)
+
+            worker.nOutstanding += 1
+            self.busyWorkers[wID] = worker
 
             req.resFuture.set_result(resRefs[1:])
             doneFut = asyncio.wrap_future(resRefs[1].future())
@@ -308,7 +350,7 @@ class BalancePolicy(Policy):
             raise PoolError("Cannot call getProfile() when there are pending requests")
 
         for worker in self.freeWorkers.values():
-            self.pendingProfs.append(worker._getProfile.remote())
+            self.pendingProfs.append(worker.actor._getProfile.remote())
 
         workerStats = await asyncio.gather(*self.pendingProfs)
         self.pendingProfs = []
@@ -323,14 +365,11 @@ class BalancePolicy(Policy):
         return latestProfs
 
     def shutdown(self):
-        self.freeWorkers = {}  # ready to recieve a request
-        self.busyWorkers = {}  # currently running a request
-        self.deadWorkers = {}  # finishing up its last request
         confirmations = []
         for worker in itertools.chain(self.freeWorkers.values(), self.busyWorkers.values()):
-            confirmations.append(worker._shutdown.remote())
+            confirmations.append(worker.actor._shutdown.remote())
 
-        ray.wait([confirmations], num_returns=len(confirmations))
+        ray.wait(confirmations, num_returns=len(confirmations))
 
 
 class ExclusivePolicy(Policy):
@@ -380,6 +419,8 @@ class ExclusivePolicy(Policy):
                 # down when there are multiple max-sized candidates
                 # (dictionaries maintain insertion order)
                 victim = self.groups.pop(victimID)
+
+                logging.debug(f"Scaling {victim.globalGroupID} down for {reqGroup.globalGroupID}")
                 victim.scale(victim.numWorkers - 1)
                 self.groups[victimID] = victim
 
@@ -387,7 +428,7 @@ class ExclusivePolicy(Policy):
             # else: nothing we can do, just queue up the request on the
             # reqGroup even though it doesn't have any free workers
 
-        return reqGroup.update(reqs=[req])
+        return reqGroup.update(reqs=[req], force=True)
 
     def update(self, reqs=(), completedWorkers=()):
         # Split into per-group updates
@@ -437,6 +478,10 @@ class ExclusivePolicy(Policy):
 
         return latestProfs
 
+    def shutdown(self):
+        for group in self.groups.values():
+            group.shutdown()
+
 
 class Pool():
     """Generic worker pool class. Users must register at least one named group
@@ -458,7 +503,7 @@ class Pool():
         types and other fairness properties.
     """
 
-    def __init__(self, maxWorkers, policy=policies.BALANCE, nGPUs=0, profLevel=0):
+    def __init__(self, maxWorkers, policy=policies.BALANCE, nGPUs=1, profLevel=0):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
             policy: Scheduling policy class to use (from policies enum)
@@ -533,7 +578,6 @@ class Pool():
         so results in undefined behavior."""
         self.profile = ray.get(self.pool.getProfile.remote())
         self.dead = True
-
         ray.wait([self.pool.shutdown.remote()], num_returns=1)
 
 
@@ -694,8 +738,21 @@ class _PoolActor():
         return latestProfs
 
     async def shutdown(self):
-        self.policy.shutdown()
-        ray.actor.exit_actor()
+        # Since this calls exit_actor, callers must use ray.wait on it to
+        # verify shutdown. Unfortunately
+        # https://github.com/ray-project/ray/issues/25280 means that errors are
+        # hidden. The try/except makes sure something gets printed.
+        try:
+            self.policy.shutdown()
+            ray.actor.exit_actor()
+        except ray.exceptions.AsyncioActorExit:
+            # Ray uses an exception for exit_actor() for asyncio actors. I
+            # don't want to put it outside the try/except in case there is a
+            # different internal error in ray.actor.exit_actor()
+            raise
+        except Exception as e:
+            logging.critical("Shutdown failed: " + traceback.format_exc())
+            raise e
 
 
 def mergePerGroupStats(base, delta):

@@ -7,7 +7,7 @@ import time
 import kaas.pool
 
 
-@ray.remote
+@ray.remote(num_gpus=1)
 class TestWorker(kaas.pool.PoolWorker):
     def __init__(self, **workerKwargs):
         # must be called before accessing inherited methods like getProfs()
@@ -91,21 +91,38 @@ def testStress(policy):
     There are more groups than workers and many requests interleaved between
     groups so this should stress the pool."""
     success = True
-    pool = kaas.pool.Pool(3, policy=policy)
+    nWorker = 1
+    nGroup = 10
+    nIter = 2
+    sleepTime = 2
 
-    groups = ['g0', 'g1', 'g2', 'g3', 'g4']
+    pool = kaas.pool.Pool(nWorker, policy=policy)
+
+    groups = ['g' + str(x) for x in range(nGroup)]
     for group in groups:
         pool.registerGroup(group, TestWorker)
 
     retRefs = []
     args = []
-    for iterIdx in range(10):
+    startTime = time.time()
+    for iterIdx in range(nIter):
         for groupIdx, group in enumerate(groups):
-            arg = iterIdx*100 + groupIdx
-            retRefs.append(pool.run(group, 'delay', args=[arg, 1]))
-            args.append(arg)
+            args.append(iterIdx*100 + groupIdx)
+            retRefs.append(pool.run(group, 'delay', args=[args[-1], sleepTime]))
+
+            args.append(1000 + iterIdx*100 + groupIdx)
+            retRefs.append(pool.run(group, 'delay', args=[args[-1], sleepTime]))
 
     rets = ray.get(ray.get(retRefs))
+
+    runTime = time.time() - startTime
+    expectTime = (nGroup * nIter * sleepTime) / nWorker
+    if runTime < expectTime:
+        print("Completed too fast: ")
+        print("\tExpected: ", expectTime)
+        print("\tGot: ", runTime)
+        success = False
+
     for idx, ret, arg in zip(range(len(rets)), rets, args):
         if ret != arg:
             print(f"Unexpected return from call {idx}: ")
@@ -114,22 +131,21 @@ def testStress(policy):
             success = False
             break
 
-    profs = pool.getProfile()
-    print(profs)
-
     pool.shutdown()
     return success
 
 
 def testProfs(policy):
     success = True
-    pool = kaas.pool.Pool(3, policy=policy)
+    pool = kaas.pool.Pool(1, policy=policy)
 
     groups = ['group0', 'group1']
     # groups = ['group0']
     retRefs = []
     for groupID in groups:
         pool.registerGroup(groupID, TestWorker)
+
+    for groupID in groups:
         for i in range(5):
             retRefs.append(pool.run(groupID, 'returnOne', args=['testInp']))
 
@@ -149,14 +165,19 @@ def testProfs(policy):
     return success
 
 
+def simple():
+    pool = kaas.pool.Pool(0, policy=kaas.pool.policies.EXCLUSIVE)
+    pool.shutdown()
+
+
 POLICY = kaas.pool.policies.EXCLUSIVE
 
 if __name__ == "__main__":
     availableTests = ['oneRet', 'multiRet', 'profiling', 'stress']
 
     parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
-    parser.add_argument('-t', '--test', action='append', choices=availableTests)
-    parser.add_argument('-p', '--policy', choices=['balance', 'exclusive'] + ['all'])
+    parser.add_argument('-t', '--test', action='append', choices=availableTests + ['all'])
+    parser.add_argument('-p', '--policy', choices=['balance', 'exclusive'])
 
     args = parser.parse_args()
 
@@ -166,6 +187,8 @@ if __name__ == "__main__":
         policy = kaas.pool.policies.BALANCE
     elif args.policy == 'exclusive':
         policy = kaas.pool.policies.EXCLUSIVE
+    else:
+        raise ValueError("Unrecognized Policy: ", args.policy)
 
     if args.test == 'all':
         tests = availableTests
