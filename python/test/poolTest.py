@@ -3,12 +3,50 @@ import ray
 from pprint import pprint  # NOQA
 import argparse
 import time
+import os
+import subprocess as sp
 
 import kaas.pool
 
 
+nResource = 2
+
+
+def getNGpus():
+    """Returns the number of available GPUs on this machine"""
+    if "CUDA_VISIBLE_DEVICES" in os.environ:
+        return len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
+    else:
+        proc = sp.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+                      stdout=sp.PIPE, text=True)
+        if proc.returncode != 0:
+            return None
+        else:
+            return proc.stdout.count('\n')
+
+
 @ray.remote(num_gpus=1)
 class TestWorker(kaas.pool.PoolWorker):
+    def __init__(self, **workerKwargs):
+        # must be called before accessing inherited methods like getProfs()
+        super().__init__(**workerKwargs)
+        self.getProfs()['n_initialized'].increment(1)
+
+    def returnOne(self, arg):
+        self.getProfs()['n_returnOne'].increment(1)
+        return arg
+
+    def returnTwo(self, arg):
+        self.getProfs()['n_returnTwo'].increment(1)
+        return True, arg
+
+    def delay(self, arg, sleepTime):
+        time.sleep(sleepTime)
+        return arg
+
+
+@ray.remote(resources={"testResource": 1})
+class TestWorkerNoGPU(kaas.pool.PoolWorker):
     def __init__(self, **workerKwargs):
         # must be called before accessing inherited methods like getProfs()
         super().__init__(**workerKwargs)
@@ -86,21 +124,36 @@ def testOneRet(policy, inputRef=False):
     return success
 
 
-def testStress(policy):
+def testStress(policy, gpu=True):
     """Submit many requests from many groups in one batch and wait for returns.
     There are more groups than workers and many requests interleaved between
     groups so this should stress the pool."""
     success = True
-    nWorker = 1
-    nGroup = 10
+
+    if gpu:
+        nGPUs = getNGpus()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nWorker = nGPUs
+        worker = TestWorker
+    else:
+        worker = TestWorkerNoGPU
+        nWorker = nResource
+
+    # nGroup = 10
+    nGroup = 5
     nIter = 2
     sleepTime = 2
+    nReqTotal = nGroup * nIter * 2
 
     pool = kaas.pool.Pool(nWorker, policy=policy)
 
     groups = ['g' + str(x) for x in range(nGroup)]
     for group in groups:
-        pool.registerGroup(group, TestWorker)
+        if gpu:
+            pool.registerGroup(group, worker)
+        else:
+            pool.registerGroup(group, worker)
 
     retRefs = []
     args = []
@@ -116,7 +169,7 @@ def testStress(policy):
     rets = ray.get(ray.get(retRefs))
 
     runTime = time.time() - startTime
-    expectTime = (nGroup * nIter * sleepTime) / nWorker
+    expectTime = (nReqTotal * sleepTime) / nWorker
     if runTime < expectTime:
         print("Completed too fast: ")
         print("\tExpected: ", expectTime)
@@ -181,7 +234,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    ray.init()
+    ray.init(resources={'testResource': nResource})
 
     if args.policy == 'balance':
         policy = kaas.pool.policies.BALANCE
@@ -204,7 +257,7 @@ if __name__ == "__main__":
         elif test == 'profiling':
             ret = testProfs(policy)
         elif test == 'stress':
-            ret = testStress(policy)
+            ret = testStress(policy, gpu=True)
         else:
             raise ValueError("Unrecognized test: ", test)
 
