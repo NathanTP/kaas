@@ -11,6 +11,7 @@ from . import cutlass
 
 from . import complexCutlass
 
+# logLevel = logging.DEBUG
 logLevel = logging.WARN
 logging.basicConfig(format="%(levelname)s: %(message)s", level=logLevel)
 
@@ -142,6 +143,12 @@ class kaasBuf():
     def __repr__(self):
         return "KaaS Buffer (name={}, key={}, dirty={}, ephemeral={}, onDevice={}, size={})".format(
                 self.name, self.key, self.dirty, self.ephemeral, self.onDevice, self.size)
+
+    def __hash__(self):
+        return hash(self.bID)
+
+    def __eq__(self, other):
+        return self is other
 
     def updateValue(self, newBuf):
         """Replace the data in this buffer. If there is already a device
@@ -322,32 +329,34 @@ class lruPolicy():
     def __init__(self):
         # Only contains buffers that are currently on the device. Constants are
         # given higher priority than other types of buffers.
-        self.lruConst = collections.deque()
-        self.lruOther = collections.deque()
+
+        # OrderedDicts let us maintain LRU order while also having O(1) updates
+        # to arbitrary entries. We only care about the key, the values are
+        # arbitrary.
+        self.lruConst = collections.OrderedDict()
+        self.lruOther = collections.OrderedDict()
 
     def remove(self, buf):
         """Remove buffer from consideration"""
         if buf.useCount > 2:
-            self.lruConst.remove(buf)
+            del self.lruConst[buf]
         else:
-            self.lruOther.remove(buf)
+            del self.lruOther[buf]
 
     def push(self, buf):
         """Place buffer in the most-recently-used slot"""
         if buf.useCount > 2:
-            self.lruConst.appendleft(buf)
+            self.lruConst[buf] = None
         else:
-            self.lruOther.appendleft(buf)
+            self.lruOther[buf] = None
 
     def pop(self):
         """Remove and return the least recently used buffer"""
         # pull from lruOther if we can, otherwise start evicting consts
-        if self.lruOther:
-            b = self.lruOther.pop()
+        if len(self.lruOther) > 0:
+            return self.lruOther.popitem(last=False)[0]
         else:
-            b = self.lruConst.pop()
-
-        return b
+            return self.lruConst.popitem(last=False)[0]
 
 
 class bufferCache():
@@ -405,6 +414,7 @@ class bufferCache():
                 updateProf('s_devDWriteBack', b.size())
                 b.toHost()
 
+            assert b.onDevice
             b.freeDevice()
             self.size -= b.size
 
@@ -435,13 +445,21 @@ class bufferCache():
         necessary. If overwrite=True, a new buffer will be created. If the
         buffer is already in the cache and dirty, it will be written back and
         re-read (you should probably make sure this doesn't happen by flushing
-        when needed)."""
+        when needed). Buffers are pinned in device memory when loaded, you must
+        explicitly release() them when you are done."""
 
-        # key = bSpec.key
-        bID = f"{clientID}:{bSpec.name}"
+        # Unique identifier for this buffer used for indexing into various
+        # buffer cache datastructures. It only needs to be unique, the value is
+        # maybe useful for debugging but otherwise meaningless. Buffers are
+        # first isolated based on clientID (must be unique in the system), then
+        # by name (must be unique within a client), and then key (buffers can
+        # be re-mapped to different keys through their lifetime, but the same
+        # key could be used for multiple buffers).
+        bID = f"{clientID}_{bSpec.name}_{bSpec.key}"
 
         buf = self.bufs.get(bID, None)
         if buf is None:
+            updateProf('n_hostDMiss', 1)
             if bSpec.ephemeral or overwrite:
                 logging.debug(f"Creating new buffer: bID:{bID}, name:{bSpec.name}, size:{bSpec.size}")
                 hbuf = None
@@ -459,39 +477,22 @@ class bufferCache():
         else:
             if buf.key != bSpec.key and not (bSpec.ephemeral or overwrite):
                 logging.debug(f"Loading new value into buffer {bID} from key {bSpec.key}")
+                updateProf('n_hostDMiss', 1)
+
+                pstart = startTimer()
                 hbuf = self.kv.get(bSpec.key)
+                updateTimer('t_hostDLoad', pstart, final=False)
+
                 buf.updateValue(hbuf)
+                updateProf('s_hostDLoad', buf.size)
             else:
+                updateProf('n_hostDHit', 1)
                 logging.debug(f"Re-using cached buffer {bID}")
 
-        # buf = self.bufs.get(key, None)
-        # if buf is not None:
-        #     logging.debug("Loading from Cache: {}".format(bSpec.name))
-        #     updateProf('n_hostDHit', 1)
-        #
-        #     # Reset LRU
-        #     if buf.onDevice:
-        #         self.policy.remove(buf)
-        # else:
-        #     updateProf('n_hostDMiss', 1)
-        #     if bSpec.ephemeral or overwrite:
-        #         logging.debug("Loading (new buffer): {}".format(bSpec.name))
-        #         buf = kaasBuf.fromSpec(bSpec)
-        #
-        #         if buf.ephemeral:
-        #             self.ephemerals[key] = buf
-        #     else:
-        #         pstart = startTimer()
-        #         raw = self.kv.get(key, profile=getProf(mod='kv'), profFinal=False)
-        #         updateTimer('t_hostDLoad', pstart, final=False)
-        #
-        #         if raw is None:
-        #             logging.debug("Loading (new buffer): {}".format(bSpec.name))
-        #             buf = kaasBuf.fromSpec(bSpec)
-        #         else:
-        #             logging.debug("Loading from KV: {} (key: {})".format(bSpec.name, key))
-        #             updateProf('s_hostDLoad', bSpec.size)
-        #             buf = kaasBuf.fromSpec(bSpec, src=raw)
+            # Pin the buffer in memory by removing it from the eviction policy.
+            # release() will place it back in the policy.
+            if buf.onDevice:
+                self.policy.remove(buf)
 
         self.makeRoom(buf.size)
 
@@ -500,6 +501,10 @@ class bufferCache():
         return buf
 
     def release(self, buf):
+        """When buffers are loaded, they are automatically pinned in memory.
+        You must explicitly release them to make them eligible for eviction.
+        The primary reason for this is so that we can guarantee a single
+        kernel's memory will be available."""
         buf.useCount += 1
         self.policy.push(buf)
 

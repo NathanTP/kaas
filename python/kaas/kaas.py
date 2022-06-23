@@ -254,7 +254,7 @@ class kaasReq():
 
             for bName in kern.arguments:
                 buf = self.bufferMap[bName]
-                val += f"\t\t{buf.name}: size={buf.size} offset={buf.offset} ephemeral={buf.ephemeral} const={buf.const}\n"
+                val += f"\t\t{buf.name}: key={buf.key} size={buf.size} offset={buf.offset} ephemeral={buf.ephemeral} const={buf.const}\n"
             val += "\n"
         return val
 

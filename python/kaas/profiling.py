@@ -1,10 +1,15 @@
 import collections.abc
 import time
 from contextlib import contextmanager
-import jsonpickle as json
+# import jsonpickle as json
+import json
 import numpy as np
 import contextlib
 import ctypes
+
+
+cudaRT = None
+profilerStarted = False
 
 
 class prof():
@@ -43,18 +48,24 @@ class prof():
             self.events.append(self.currentEvent)
             self.currentEvent = 0.0
 
-    def report(self, includeEvents=False):
+    def report(self, includeEvents=False, metrics=None):
         """Create a report dictionary from this profile. If the profile was
         created with detail=True, full summary statistics are included.
-        Otherwise only the mean is reported. If includeEvents=True, the full
-        trace of all events will also be included."""
+        Otherwise only the mean is reported.
+
+        Args:
+            includeEvents: Include the full trace of all events.
+            metrics: List of metrics to report. If "None", all available
+                metrics are reported. If the profile was created with
+                detail=False, only 'mean' and 'total' are available.
+            """
         if self.nevent == 0:
             raise RuntimeError("Metric has no events")
 
         rep = {}
         rep['total'] = self.total
-
         rep['mean'] = self.total / self.nevent
+
         if self.detail:
             events = np.array(self.events)
             rep['min'] = events.min()
@@ -66,7 +77,10 @@ class prof():
             if includeEvents:
                 rep['events'] = self.events
 
-        return rep
+        if metrics is None:
+            metrics = ['total', 'mean', 'min', 'max', 'std', 'p50', 'p90', 'p99', 'events']
+
+        return {metric: rep[metric] for metric in metrics if metric in rep}
 
 
 class profCollection(collections.abc.MutableMapping):
@@ -129,23 +143,23 @@ class profCollection(collections.abc.MutableMapping):
                 self.mods[name] = profCollection(detail=self.detail)
             self.mods[name].merge(mod)
 
-    def report(self, includeEvents=False):
+    def report(self, includeEvents=False, metrics=None):
         """Create a report dctionary from this collection of the form
         {metricName: metricReport} where metricReport is returned by
-        prof.report(). See prof.report() for details of the contents of each
-        metricReport, including the behavior of includeEvents."""
-
-        flattened = {}
+        prof.report(). If there are modules, they will be sub-dictionaries in
+        the report. See prof.report() for details of the contents of each
+        metricReport, including the behavior of 'includeEvents' and 'metrics'."""
+        report = {}
         for name, v in self.profs.items():
             try:
-                flattened[name] = v.report(includeEvents=includeEvents)
+                report[name] = v.report(includeEvents=includeEvents, metrics=metrics)
             except Exception as e:
                 raise RuntimeError(f"Failed to report metric '{name}'") from e
 
         for name, mod in self.mods.items():
-            flattened = {**flattened, **{name+":"+itemName: v for itemName, v in mod.report(includeEvents=includeEvents).items()}}
+            report[name] = mod.report(includeEvents=includeEvents, metrics=metrics)
 
-        return flattened
+        return report
 
     def reset(self):
         """Clears all existing metrics. Any instantiated modules will continue
