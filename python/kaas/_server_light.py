@@ -351,10 +351,15 @@ class bufferCache():
         memFree, memAvail = cuda.mem_get_info()
 
         # Maximum number of bytes on the device
-        # We build in a bit of a margin because we can't track size very
-        # accurately. We assume we won't be off by more than this margin within
-        # a single request (this is just a guess).
-        self.cap = memAvail - 10*1024*1024
+        # Nvidia's allocator is quite inefficient. Experimentally, it seems to
+        # allocate on fixed 2MB blocks. If you have something that isn't an
+        # exact multiple of 2MB, it's gonna waste memory. This means we can't
+        # really accurately track memory usage (I guess we could try rounding
+        # up to 2MB boundaries...). Anyway, the hacky solution is to build in a
+        # big margin. A better solution is to use a better memory allocator
+        # like RMM, but that doesn't seem to play nice with pycuda. Future
+        # work.
+        self.cap = memAvail - 300*1024*1024
 
         # Size represents the amount of memory used on the device, it's more
         # complicated than just the sum of buffer sizes because of device
@@ -436,7 +441,6 @@ class bufferCache():
                 self.policy.remove(buf)
 
         self.makeRoom(buf.size)
-
         self.size += buf.toDevice()
 
         return buf

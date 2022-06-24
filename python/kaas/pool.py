@@ -13,8 +13,8 @@ from dataclasses import dataclass
 
 from . import profiling
 
-logLevel = logging.DEBUG
-# logLevel = logging.WARN
+# logLevel = logging.DEBUG
+logLevel = logging.WARN
 logging.basicConfig(format="pool-%(levelname)s: %(message)s", level=logLevel)
 
 
