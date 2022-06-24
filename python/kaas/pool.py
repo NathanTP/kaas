@@ -6,7 +6,16 @@ import collections
 import abc
 import enum
 import concurrent
+import itertools
+import logging
+import traceback
+from dataclasses import dataclass
+
 from . import profiling
+
+logLevel = logging.DEBUG
+# logLevel = logging.WARN
+logging.basicConfig(format="pool-%(levelname)s: %(message)s", level=logLevel)
 
 
 PoolReq = collections.namedtuple('PoolReq', ['groupID', 'fName', 'num_returns', 'args', 'kwargs', 'resFuture'])
@@ -94,6 +103,23 @@ class PoolWorker():
         except AttributeError:
             raise PoolError("PoolWorkers must call super().__init__() in order to use profiling")
 
+    def _shutdown(self):
+        """Will finish any pending work and then exit gracefully"""
+        # Since this calls exit_actor, callers must use ray.wait on it to
+        # verify shutdown. Unfortunately
+        # https://github.com/ray-project/ray/issues/25280 means that errors are
+        # hidden. The try/except makes sure something gets printed.
+        try:
+            ray.actor.exit_actor()
+        except ray.exceptions.AsyncioActorExit:
+            # Ray uses an exception for exit_actor() for asyncio actors. I
+            # don't want to put it outside the try/except in case there is a
+            # different internal error in ray.actor.exit_actor()
+            raise
+        except Exception as e:
+            logging.critical("Shutdown failed: " + traceback.format_exc())
+            raise e
+
 
 class Policy(abc.ABC):
     """A policy manages workers on behalf of the Pool class. It implements
@@ -158,8 +184,14 @@ class Policy(abc.ABC):
         pass
 
 
+@dataclass
+class _WorkerState():
+    actor: PoolWorker
+    nOutstanding: int
+
+
 class BalancePolicy(Policy):
-    def __init__(self, maxWorkers, profLevel=0, globalGroupID=None):
+    def __init__(self, maxWorkers, profLevel=0, globalGroupID=None, strict=False):
         """The BalancePolicy balances requests across workers with no affinity
         or isolation between clients. Multiple clients may be registerd, but
         they must all use the same worker class.
@@ -170,7 +202,10 @@ class BalancePolicy(Policy):
             groupID to measure some metrics per-group. If groupID is provided
             here, all metrics (including policy-wide metrics) will be recorded
             under that group.
+            strict: If true, the policy will reject any requests that can't be
+            scheduled rather than queuing them internally.
         """
+        self.strict = strict
         self.maxWorkers = maxWorkers
         self.numWorkers = 0
         self.workerClass = None
@@ -183,10 +218,9 @@ class BalancePolicy(Policy):
         # References to profiling data from killed workers
         self.pendingProfs = []
 
-        # {workerID: worker actor handle}
+        # {workerID: _WorkerState}
         self.freeWorkers = {}  # ready to recieve a request
         self.busyWorkers = {}  # currently running a request
-        self.deadWorkers = {}  # finishing up its last request
 
         self.pendingReqs = collections.deque()
 
@@ -201,11 +235,12 @@ class BalancePolicy(Policy):
         """Change the target number of workers."""
         delta = newMax - self.maxWorkers
         if delta > 0:
-            self.profs['n_cold_start'].increment(delta)
             # scale up
+            self.profs['n_cold_start'].increment(delta)
             for i in range(delta):
-                self.freeWorkers[self.nextWID] = self.workerClass.remote(
-                    profLevel=self.profLevel, defaultGroup=self.globalGroupID)
+                worker = self.workerClass.remote(profLevel=self.profLevel, defaultGroup=self.globalGroupID)
+
+                self.freeWorkers[self.nextWID] = _WorkerState(worker, 0)
                 self.nextWID += 1
 
         elif delta < 0:
@@ -213,19 +248,18 @@ class BalancePolicy(Policy):
             self.profs['n_killed'].increment(-delta)
 
             # try free workers first
-            while len(self.freeWorkers) > 0 and delta > 0:
+            while len(self.freeWorkers) > 0 and delta < 0:
                 _, toKill = self.freeWorkers.popitem()
-                self.pendingProfs.append(toKill._getProfile.remote())
-                toKill.terminate.remote()
-                delta -= 1
+                self.pendingProfs.append(toKill.actor._getProfile.remote())
+                toKill.actor._shutdown.remote()
+                delta += 1
 
             # next take from busy pool
-            while delta > 0:
+            while delta < 0:
                 wID, toKill = self.busyWorkers.popitem()
-                self.pendingProfs.append(toKill._getProfile.remote())
-                toKill.terminate.remote()
-                self.deadWorkers[wID] = toKill
-                delta -= 1
+                self.pendingProfs.append(toKill.actor._getProfile.remote())
+                toKill.actor._shutdown.remote()
+                delta += 1
         else:
             # don't actually have to scale
             pass
@@ -253,18 +287,29 @@ class BalancePolicy(Policy):
             self.scale(realMax)
 
     def update(self, reqs=(), completedWorkers=()):
+        """The balance policy will try to run requests if possible, but if
+        there are no free workers, it may queue them up pending new
+        completions.
+
+        Returns: (newRuns, rejectedReqs)
+            newRuns: {doneFuture: wID, ...}
+            rejectedReqs: [req]
+                Only returned if strict==True, otherwise only the newRuns dict
+                is returned.
+        """
         if self.workerClass is None:
             raise PoolError("No groups have been registered!")
 
-        if self.maxWorkers == 0:
-            raise PoolError("Requested worker but maxWorkers==0")
-
         for wID in completedWorkers:
             doneWorker = self.busyWorkers.pop(wID, None)
+
+            # We don't need to do anything for completions of dead workers
             if doneWorker is not None:
-                self.freeWorkers[wID] = doneWorker
-            else:
-                del self.deadWorkers[wID]
+                doneWorker.nOutstanding -= 1
+                if doneWorker.nOutstanding == 0:
+                    self.freeWorkers[wID] = doneWorker
+                else:
+                    self.busyWorkers[wID] = doneWorker
 
         self.pendingReqs += reqs
 
@@ -275,18 +320,26 @@ class BalancePolicy(Policy):
         newRuns = {}
         for req in toSchedule:
             wID, worker = self.freeWorkers.popitem()
-            self.busyWorkers[wID] = worker
 
-            resRefs = worker._runWithCompletion.options(
+            logging.debug(f"Submitting request for group {req.groupID} to worker {wID}")
+            resRefs = worker.actor._runWithCompletion.options(
                 num_returns=req.num_returns + 1).remote(
                 req.fName, *req.args,
                 groupID=req.groupID, **req.kwargs)
+
+            worker.nOutstanding += 1
+            self.busyWorkers[wID] = worker
 
             req.resFuture.set_result(resRefs[1:])
             doneFut = asyncio.wrap_future(resRefs[1].future())
             newRuns[doneFut] = wID
 
-        return newRuns
+        if self.strict:
+            rejectedReqs = self.pendingReqs
+            self.pendingReqs = collections.deque()
+            return newRuns, rejectedReqs
+        else:
+            return newRuns
 
     async def getProfile(self):
         """Schema: There is only one pool so there are no per-group pool profs
@@ -297,7 +350,7 @@ class BalancePolicy(Policy):
             raise PoolError("Cannot call getProfile() when there are pending requests")
 
         for worker in self.freeWorkers.values():
-            self.pendingProfs.append(worker._getProfile.remote())
+            self.pendingProfs.append(worker.actor._getProfile.remote())
 
         workerStats = await asyncio.gather(*self.pendingProfs)
         self.pendingProfs = []
@@ -310,6 +363,13 @@ class BalancePolicy(Policy):
         self.initProfs()
 
         return latestProfs
+
+    def shutdown(self):
+        confirmations = []
+        for worker in itertools.chain(self.freeWorkers.values(), self.busyWorkers.values()):
+            confirmations.append(worker.actor._shutdown.remote())
+
+        ray.wait(confirmations, num_returns=len(confirmations))
 
 
 class ExclusivePolicy(Policy):
@@ -324,22 +384,41 @@ class ExclusivePolicy(Policy):
         # {groupID: BalancePolicy}
         self.groups = {}
 
+        # List of [req] that haven't been scheduled yet
+        self.pendingReqs = []
+
     def registerGroup(self, groupID, workerClass: PoolWorker):
-        group = BalancePolicy(0, globalGroupID=groupID, profLevel=self.profLevel)
+        group = BalancePolicy(0, globalGroupID=groupID, profLevel=self.profLevel, strict=True)
         group.registerGroup(groupID, workerClass)
         self.groups[groupID] = group
 
     # It's unlikely that we get more than one or two reqs per update so it's
     # just easier to handle each req independently rather than batch
     def handleReq(self, req):
+        """Attempt to schedule req on its group. This may involve rebalancing
+        groups. If the req can't be scheduled (group is busy and we decide not
+        to rebalance), we will return it.
+
+        returns:
+            None: The req could not be scheduled
+            newRuns: newly scheduled run
+        """
         reqGroup = self.groups[req.groupID]
-        if len(reqGroup.freeWorkers) > 0:
-            # Group can handle the request right away
-            pass
-        elif self.numWorkers < self.maxWorkers:
+        newRuns, rejectedReqs = reqGroup.update([req])
+
+        # If we succeed the first time, no need to try and scale
+        if len(rejectedReqs) == 0:
+            return newRuns
+
+        # The group couldn't handle the request immediately, consider scaling
+        if self.numWorkers < self.maxWorkers:
             # free to scale
+            logging.debug(f"Scaling {req.groupID} to {reqGroup.numWorkers + 1} from unused workers")
             reqGroup.scale(reqGroup.numWorkers + 1)
             self.numWorkers += 1
+            newRuns, rejected = reqGroup.update(reqs=[req])
+            assert len(rejected) == 0
+            return newRuns
         else:
             # Gonna have to consider shrinking someone
             victimID = None
@@ -359,14 +438,20 @@ class ExclusivePolicy(Policy):
                 # down when there are multiple max-sized candidates
                 # (dictionaries maintain insertion order)
                 victim = self.groups.pop(victimID)
+
+                logging.debug(f"Scaling {victim.globalGroupID} ({victim.numWorkers} workers) down for {reqGroup.globalGroupID} ({reqGroup.numWorkers} workers)")
                 victim.scale(victim.numWorkers - 1)
                 self.groups[victimID] = victim
 
                 reqGroup.scale(reqGroup.numWorkers + 1)
-            # else: nothing we can do, just queue up the request on the
-            # reqGroup even though it doesn't have any free workers
-
-        return reqGroup.update(reqs=[req])
+                newRuns, rejected = reqGroup.update(reqs=[req])
+                assert len(rejected) == 0
+                return newRuns
+            else:
+                # Nothing we can do, just reject the request and let the caller
+                # deal with it
+                logging.debug(f"Rejected request for {req.groupID}")
+                return None
 
     def update(self, reqs=(), completedWorkers=()):
         # Split into per-group updates
@@ -383,10 +468,34 @@ class ExclusivePolicy(Policy):
         # Update all the groups with completions so that they have the most
         # up-to-date state in case we have to scale
         for gID, completions in groupCompletions.items():
-            groupRuns[gID] = self.groups[gID].update(completedWorkers=completions)
+            logging.debug(f"Received completion for {gID}")
+            newRuns, rejectedRuns = self.groups[gID].update(completedWorkers=completions)
+            assert len(newRuns) == 0 and len(rejectedRuns) == 0
 
-        for req in reqs:
-            groupRuns[req.groupID] |= self.handleReq(req)
+        self.pendingReqs += reqs
+
+        # Try to schedule any pending requests. If they can't be scheduled, put
+        # them back on the list of pending requests. This preserves FCFS order.
+        # This is kind of naive because it will always iterate all pending
+        # requests, but the busyGroups optimization should make this not too
+        # bad. Hopefully the number of pendingReqs won't get too big (it's on
+        # the user of the pool to keep a reasonable number of outstanding
+        # requests)
+        remainingReqs = []
+        busyGroups = set()
+        for req in self.pendingReqs:
+            # Optimization to avoid attempting to schedule a req that will be
+            # rejected
+            if req.groupID in busyGroups:
+                remainingReqs.append(req)
+            else:
+                newRun = self.handleReq(req)
+                if newRun is None:
+                    remainingReqs.append(req)
+                    busyGroups.add(req.groupID)
+                else:
+                    groupRuns[req.groupID] |= newRun
+        self.pendingReqs = remainingReqs
 
         newRuns = {}
         for gID, runs in groupRuns.items():
@@ -416,6 +525,10 @@ class ExclusivePolicy(Policy):
 
         return latestProfs
 
+    def shutdown(self):
+        for group in self.groups.values():
+            group.shutdown()
+
 
 class Pool():
     """Generic worker pool class. Users must register at least one named group
@@ -428,6 +541,13 @@ class Pool():
     workers to only one predictable behavior so that policies can optimize for
     worker properties.
 
+    WARNING: There is currently a limitation that workers must use a resource
+    that has the same availability as maxWorkers. In other words, if they
+    require one GPU then maxWorkers MUST be the number of GPUs in the system.
+    If they don't require a real resource, you MUST create a custom resource
+    and set maxWorkers to whatever the resource limit is. I don't have a good
+    way of enforcing this yet, so be warned. The symptom will likely be a hang.
+
     How this is different from Ray Actors and Tasks:
         You can think of the Pool as an interface to customize Ray's workers.
         Unlike tasks, workers can opportunistically cache data between requests
@@ -437,25 +557,34 @@ class Pool():
         types and other fairness properties.
     """
 
-    def __init__(self, maxWorkers, policy=policies.BALANCE, nGPUs=0, profLevel=0):
+    def __init__(self, maxWorkers, policy=policies.BALANCE, profLevel=0):
         """Arguments:
-            maxWorkers: The total number of concurrent workers to allow
+            maxWorkers: The total number of concurrent workers to allow. If
+            there are multiple nodes in the system, each node will get an even
+            share of maxWorkers.
             policy: Scheduling policy class to use (from policies enum)
-            nGPUs: Number of GPUs to assign to each worker. Pool does not
-                   currently support per-group nGPUs.
         """
-        self.pool = _PoolActor.remote(maxWorkers, policy=policy, nGPUs=nGPUs, profLevel=profLevel)
+        self.profile = None
+        self.dead = False
+
+        self.pool = _PoolActor.remote(maxWorkers, policy=policy, profLevel=profLevel)
 
     def registerGroup(self, groupID, workerClass: PoolWorker):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run().
         """
+        if self.dead:
+            raise PoolError("Pool has been shutdown")
+
         registerConfirm = self.pool.registerGroup.remote(groupID, workerClass)
         ray.get(registerConfirm)
 
     def registerGroupAsync(self, groupID, workerClass: PoolWorker):
         """Like registerGroup() but returns immediately with a reference that
         must be waited on before sending requests for this group."""
+        if self.dead:
+            raise PoolError("Pool has been shutdown")
+
         return self.pool.registerGroup.remote(groupID, workerClass)
 
     def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None, refDeps=None):
@@ -476,6 +605,9 @@ class Pool():
                 need to dereference twice: once to get the worker return
                 reference(s), and again to get the value of those return(s).
         """
+        if self.dead:
+            raise PoolError("Pool has been shutdown")
+
         return self.pool.run.options(num_returns=num_returns).\
             remote(groupID, methodName, num_returns=num_returns, args=args, kwargs=kwargs, refDeps=refDeps)
 
@@ -487,7 +619,20 @@ class Pool():
         WARNING: The caller must ensure that there is no pending work on the
         pool before calling getProfile(). Calling getProfile() while there are
         outstanding requests will result in undefined behavior."""
-        return ray.get(self.pool.getProfile.remote())
+        if self.dead:
+            return self.profile
+        else:
+            return ray.get(self.pool.getProfile.remote())
+
+    def shutdown(self):
+        """Free any resources associated with this pool. The pool object
+        remains and getProfile() will continue to work, but no other methods
+        will be valid. A pool cannot be restarted. The user is responsible for
+        ensuring that no work is currently pending on the actor, failure to do
+        so results in undefined behavior."""
+        self.profile = ray.get(self.pool.getProfile.remote())
+        self.dead = True
+        ray.wait([self.pool.shutdown.remote()], num_returns=1)
 
 
 @ray.remote
@@ -497,12 +642,10 @@ class _PoolActor():
     completions via a "Done" reference. For each event, the Pool updates the
     Policy which handles the actual pool management and worker invocation."""
 
-    def __init__(self, maxWorkers, policy, nGPUs=0, profLevel=0):
+    def __init__(self, maxWorkers, policy, profLevel=0):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
             policy: Scheduling policy class to use
-            nGPUs: Number of GPUs to assign to each worker. Pool does not
-                   currently support per-group nGPUs.
         """
         self.profLevel = profLevel
         self.loop = IOLoop.instance()
@@ -541,7 +684,7 @@ class _PoolActor():
     async def _waitRefs(self, refs):
         await self.asyncioLoop. \
             run_in_executor(self.threadPool,
-                            lambda: ray.wait(refs, fetch_local=False))
+                            lambda: ray.wait(refs, fetch_local=False, num_returns=len(refs)))
 
     # This one uses normal asyncio.wait but it materializes the references
     # which could be slow and wasteful depending on what the references point
@@ -645,6 +788,23 @@ class _PoolActor():
         self.groupProfs = self.profs.mod('groups')
 
         return latestProfs
+
+    async def shutdown(self):
+        # Since this calls exit_actor, callers must use ray.wait on it to
+        # verify shutdown. Unfortunately
+        # https://github.com/ray-project/ray/issues/25280 means that errors are
+        # hidden. The try/except makes sure something gets printed.
+        try:
+            self.policy.shutdown()
+            ray.actor.exit_actor()
+        except ray.exceptions.AsyncioActorExit:
+            # Ray uses an exception for exit_actor() for asyncio actors. I
+            # don't want to put it outside the try/except in case there is a
+            # different internal error in ray.actor.exit_actor()
+            raise
+        except Exception as e:
+            logging.critical("Shutdown failed: " + traceback.format_exc())
+            raise e
 
 
 def mergePerGroupStats(base, delta):
