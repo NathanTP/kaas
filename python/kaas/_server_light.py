@@ -87,7 +87,8 @@ eventMetrics = [
     'n_hostDWriteBack',
     't_hostDWriteBack',
     'n_devDHit',
-    'n_devDMiss',
+    'n_devDMissCompulsory',
+    'n_devDMissCapacity',
     'n_devDEvict',
     'n_invoke',
     't_devDEvict',
@@ -107,6 +108,17 @@ eventMetrics += ['t_makeRoom', 't_invokeExternal', 't_setupArgs', 't_bCacheLoad'
 
 # These metrics need to be handled with special cases
 metricSpecial = ['t_invoke']
+
+
+def bSpecToBID(bSpec, clientID):
+    # Unique identifier for this buffer used for indexing into various
+    # buffer cache datastructures. It only needs to be unique, the value is
+    # maybe useful for debugging but otherwise meaningless. Buffers are
+    # first isolated based on clientID (must be unique in the system), then
+    # by name (must be unique within a client), and then key (buffers can
+    # be re-mapped to different keys through their lifetime, but the same
+    # key could be used for multiple buffers).
+    return f"{clientID}_{bSpec.name}_{bSpec.key}"
 
 
 class kaasBuf():
@@ -351,10 +363,15 @@ class bufferCache():
         memFree, memAvail = cuda.mem_get_info()
 
         # Maximum number of bytes on the device
-        # We build in a bit of a margin because we can't track size very
-        # accurately. We assume we won't be off by more than this margin within
-        # a single request (this is just a guess).
-        self.cap = memAvail - 10*1024*1024
+        # Nvidia's allocator is quite inefficient. Experimentally, it seems to
+        # allocate on fixed 2MB blocks. If you have something that isn't an
+        # exact multiple of 2MB, it's gonna waste memory. This means we can't
+        # really accurately track memory usage (I guess we could try rounding
+        # up to 2MB boundaries...). Anyway, the hacky solution is to build in a
+        # big margin. A better solution is to use a better memory allocator
+        # like RMM, but that doesn't seem to play nice with pycuda. Future
+        # work.
+        self.cap = memAvail - 300*1024*1024
 
         # Size represents the amount of memory used on the device, it's more
         # complicated than just the sum of buffer sizes because of device
@@ -379,14 +396,15 @@ class bufferCache():
             b.freeDevice()
             self.size -= b.size
 
-    def makeRoomForBufs(self, bSpecs):
+    def makeRoomForBufs(self, bSpecs, clientID):
         """Ensure that we have enough room to load all the buffers in bSpecs.
         This accounts for if any of the buffers are already on the device. This
         function helps performance and possibly memory fragmentation by
         batching frees()."""
         total = 0
         for bSpec in bSpecs:
-            cacheBuf = self.bufs.get(bSpec.key, None)
+            bID = bSpecToBID(bSpec, clientID)
+            cacheBuf = self.bufs.get(bID, None)
             if cacheBuf is None:
                 total += bSpec.size
             else:
@@ -403,14 +421,7 @@ class bufferCache():
         when needed). Buffers are pinned in device memory when loaded, you must
         explicitly release() them when you are done."""
 
-        # Unique identifier for this buffer used for indexing into various
-        # buffer cache datastructures. It only needs to be unique, the value is
-        # maybe useful for debugging but otherwise meaningless. Buffers are
-        # first isolated based on clientID (must be unique in the system), then
-        # by name (must be unique within a client), and then key (buffers can
-        # be re-mapped to different keys through their lifetime, but the same
-        # key could be used for multiple buffers).
-        bID = f"{clientID}_{bSpec.name}_{bSpec.key}"
+        bID = bSpecToBID(bSpec, clientID)
 
         buf = self.bufs.get(bID, None)
         if buf is None:
@@ -436,7 +447,6 @@ class bufferCache():
                 self.policy.remove(buf)
 
         self.makeRoom(buf.size)
-
         self.size += buf.toDevice()
 
         return buf
@@ -470,9 +480,8 @@ class bufferCache():
         self.dirtyBufs = {}
 
     def drop(self, bID):
-        """Remove a buffer from the cache (writing back if dirty). This frees
-        any device memory and drops references to the host buffer (Python's GC
-        will pick it up eventually)."""
+        """Completely remove a buffer from the cache (writing back if dirty).
+        This frees device memory, host memory, and host metdata.  """
         logging.debug("Dropping " + str(bID))
         buf = self.bufs[bID]
         self._flushOne(buf)
@@ -483,9 +492,9 @@ class bufferCache():
             self.size -= buf.size
 
         if buf.dirty:
-            self.dirtyBufs.pop(buf.key, None)
+            self.dirtyBufs.pop(bID, None)
 
-        del self.bufs[buf.key]
+        del self.bufs[bID]
 
 
 def initServer():
@@ -525,7 +534,7 @@ def kaasServeInternal(req, kv, newProfs=None, clientID=None):
     # We try to help the cuda memory allocator out by freeing all the buffers
     # at once instead of mixing frees and mallocs at a fine-grain. This loop
     # finds all the unique buffers in the request
-    bCache.makeRoomForBufs(req.bufferMap.values())
+    bCache.makeRoomForBufs(req.bufferMap.values(), clientID)
 
     # Pre-fetch all the arguments, this is important for iterative algorithms
     # that would have to do this on every iteration
