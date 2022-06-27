@@ -27,7 +27,7 @@ metrics = [
 # When using the threadpool-based waiter, this is the number of waiter threads
 # to use. It's a tradeoff between Python overheads and maximum number of
 # outstanding requests.
-N_WAIT_THREADS = 32
+maxOutstanding = 32
 
 
 # Policy name constants
@@ -103,12 +103,19 @@ class PoolWorker():
         except AttributeError:
             raise PoolError("PoolWorkers must call super().__init__() in order to use profiling")
 
+    def shutdown(self):
+        """User overrideable shutdown function. If there is any client-specific
+        code to cleanup, run it here. Note that Ray doesn't delete the object
+        before exiting, so __del__ doesn't necessarily run."""
+        pass
+
     def _shutdown(self):
         """Will finish any pending work and then exit gracefully"""
         # Since this calls exit_actor, callers must use ray.wait on it to
         # verify shutdown. Unfortunately
         # https://github.com/ray-project/ray/issues/25280 means that errors are
         # hidden. The try/except makes sure something gets printed.
+        self.shutdown()
         try:
             ray.actor.exit_actor()
         except ray.exceptions.AsyncioActorExit:
@@ -657,7 +664,7 @@ class _PoolActor():
         self.idle.set()
 
         self.asyncioLoop = asyncio.get_running_loop()
-        self.threadPool = concurrent.futures.ThreadPoolExecutor(max_workers=N_WAIT_THREADS)
+        self.threadPool = concurrent.futures.ThreadPoolExecutor(max_workers=maxOutstanding)
 
         if policy is policies.BALANCE:
             self.policy = BalancePolicy(maxWorkers, profLevel=profLevel)
