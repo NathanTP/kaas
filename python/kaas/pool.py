@@ -5,7 +5,6 @@ import asyncio
 import collections
 import abc
 import enum
-import concurrent
 import itertools
 import logging
 import traceback
@@ -24,10 +23,12 @@ metrics = [
     "t_policy_run"  # Time from receiving the request until the worker is invoked
 ]
 
-# When using the threadpool-based waiter, this is the number of waiter threads
-# to use. It's a tradeoff between Python overheads and maximum number of
-# outstanding requests.
-maxOutstanding = 32
+
+# This is more of a tuning parameter, but the pool will eventually start to
+# slow down if you have too many outstanding requests. This is just a heuristic
+# but users should try to stay below it if possible for max performance. You
+# can always profile your own code and see.
+maxOutstanding = 256
 
 
 # Policy name constants
@@ -126,6 +127,37 @@ class PoolWorker():
         except Exception as e:
             logging.critical("Shutdown failed: " + traceback.format_exc())
             raise e
+
+
+def remote_with_confirmation(**kwargs):
+    if 'num_returns' in kwargs:
+        kwargs['num_returns'] += 1
+    else:
+        kwargs['num_returns'] = 2
+
+    def _remote_with_confirmation(func):
+        """Decorator to create a ray task that additionally returns a flag used as
+        a proxy for task completion. Ray is generally not great about determining
+        if references are ready without actually fetching them (ray.wait(...,
+        fetch_local=False) only works in certain circumstances). With
+        this, you can use the confRef rather than the actual values.
+
+        WARNING: using .options(num_returns=N) will not work as expected. You
+        must always use num_returns=N+1 because remote_with_confirmation adds
+        an extra argument. If passing num_returns=N to the decorator, you can
+        use the expected number of returns, this N+1 is only for .options().
+        """
+        @ray.remote(**kwargs)
+        def with_confirmation_decorated(*args, **kwargs):
+            rets = func(*args, **kwargs)
+            if not isinstance(rets, tuple):
+                rets = (rets,)
+
+            return (True, *rets)
+
+        return with_confirmation_decorated
+
+    return _remote_with_confirmation
 
 
 class Policy(abc.ABC):
@@ -420,7 +452,7 @@ class ExclusivePolicy(Policy):
         # The group couldn't handle the request immediately, consider scaling
         if self.numWorkers < self.maxWorkers:
             # free to scale
-            logging.debug(f"Scaling {req.groupID} to {reqGroup.numWorkers + 1} from unused workers")
+            logging.debug(f"Scaling up {req.groupID} to {reqGroup.numWorkers + 1} from unused workers")
             reqGroup.scale(reqGroup.numWorkers + 1)
             self.numWorkers += 1
             newRuns, rejected = reqGroup.update(reqs=[req])
@@ -439,17 +471,22 @@ class ExclusivePolicy(Policy):
                     victimID = candidateID
                     maxSize = candidate.numWorkers
 
-            if reqGroup.numWorkers < maxSize:
+            if reqGroup.numWorkers == 0 or reqGroup.numWorkers + 1 < maxSize:
                 # Scale the victim down and replace it in the dictionary to
                 # ensure that the same victim doesn't get repeated scaled
                 # down when there are multiple max-sized candidates
-                # (dictionaries maintain insertion order)
+                # (dictionaries maintain insertion order). If the reqGroup
+                # doesn't have any workers, we have to scale someone down to
+                # avoid starvation. If it's within one of the max, scaling
+                # would just swap their places and maintain imballance, leading
+                # to unnecessary thrashing.
                 victim = self.groups.pop(victimID)
 
-                logging.debug(f"Scaling {victim.globalGroupID} ({victim.numWorkers} workers) down for {reqGroup.globalGroupID} ({reqGroup.numWorkers} workers)")
+                logging.debug(f"Scaling down {victim.globalGroupID} to {victim.numWorkers - 1} for {reqGroup.globalGroupID}")
                 victim.scale(victim.numWorkers - 1)
                 self.groups[victimID] = victim
 
+                logging.debug(f"Scaling up {reqGroup.globalGroupID} to {reqGroup.numWorkers + 1} after rebalance")
                 reqGroup.scale(reqGroup.numWorkers + 1)
                 newRuns, rejected = reqGroup.update(reqs=[req])
                 assert len(rejected) == 0
@@ -616,7 +653,7 @@ class Pool():
             raise PoolError("Pool has been shutdown")
 
         return self.pool.run.options(num_returns=num_returns).\
-            remote(groupID, methodName, num_returns=num_returns, args=args, kwargs=kwargs, refDeps=refDeps)
+            remote(groupID, methodName, *refDeps, num_returns=num_returns, args=args, kwargs=kwargs)
 
     def getProfile(self) -> profiling.profCollection:
         """Returns any profiling data collected so far in this pool and resets
@@ -663,9 +700,6 @@ class _PoolActor():
         self.idle = asyncio.Event()
         self.idle.set()
 
-        self.asyncioLoop = asyncio.get_running_loop()
-        self.threadPool = concurrent.futures.ThreadPoolExecutor(max_workers=maxOutstanding)
-
         if policy is policies.BALANCE:
             self.policy = BalancePolicy(maxWorkers, profLevel=profLevel)
         elif policy is policies.EXCLUSIVE:
@@ -685,21 +719,6 @@ class _PoolActor():
 
         self.loop.add_callback(self.handleEvent)
 
-    # This one uses a thread pool. It avoids materializing the refs, but it can
-    # only handle a limited number of outstanding requests. Scaling up the
-    # number of threads can have an adverse impact on overall performance.
-    async def _waitRefs(self, refs):
-        await self.asyncioLoop. \
-            run_in_executor(self.threadPool,
-                            lambda: ray.wait(refs, fetch_local=False, num_returns=len(refs)))
-
-    # This one uses normal asyncio.wait but it materializes the references
-    # which could be slow and wasteful depending on what the references point
-    # to. Ideally, we would have a fetch_local=False option for ray futures,
-    # but that is WIP: https://github.com/ray-project/ray/issues/25415
-    # async def _waitRefs(self, refs):
-    #     await asyncio.wait(refs, return_when=asyncio.ALL_COMPLETED)
-
     async def registerGroup(self, groupID, workerClass: PoolWorker):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run()."""
@@ -708,7 +727,7 @@ class _PoolActor():
     # run() keeps a Ray remote function alive for the caller so that it can
     # proxy the request to the pool and the response back to the caller. run()
     # will stay alive until the entire request is finished.
-    async def run(self, groupID, methodName, num_returns=1, args=(), kwargs=None, refDeps=None):
+    async def run(self, groupID, methodName, *refDeps, num_returns=1, args=(), kwargs=None):
         """Schedule some work on the pool.
 
         Arguments:
@@ -742,9 +761,6 @@ class _PoolActor():
         req = PoolReq(groupID=groupID, fName=methodName,
                       num_returns=num_returns, args=args, kwargs=kwargs,
                       resFuture=resFuture)
-
-        if refDeps is not None:
-            await self._waitRefs(refDeps)
 
         with profiling.timer('t_policy_run', self.groupProfs.mod(groupID)):
             self.newReqQ.put_nowait(req)

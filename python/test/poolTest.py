@@ -25,6 +25,16 @@ def getNGpus():
             return proc.stdout.count('\n')
 
 
+@kaas.pool.remote_with_confirmation()
+def testTask(arg):
+    return arg
+
+
+@kaas.pool.remote_with_confirmation(num_returns=2)
+def testTaskTwo(arg):
+    return arg, arg*10
+
+
 @ray.remote(num_gpus=1)
 class TestWorker(kaas.pool.PoolWorker):
     def __init__(self, **workerKwargs):
@@ -223,10 +233,59 @@ def simple():
     pool.shutdown()
 
 
+def testConfirm(policy):
+    success = True
+    groupID = "exampleGroup"
+    pool = kaas.pool.Pool(3, policy=policy)
+    pool.registerGroup(groupID, TestWorker)
+
+    refs = []
+    for i in range(3):
+        confRef, retRef = testTask.remote(i)
+        refs.append(pool.run(groupID, "returnOne", args=[retRef], refDeps=[confRef]))
+
+    retRefs = [ray.get(ref) for ref in refs]
+    for expect, retRef in enumerate(retRefs):
+        ret = ray.get(retRef)
+        if expect != ret:
+            print(f"Test Failed: expected '{expect}', got '{ret}'")
+            success = False
+
+    pool.shutdown()
+
+    return success
+
+
+def testConfirmMultiRet(policy):
+    success = True
+    groupID = "exampleGroup"
+    pool = kaas.pool.Pool(3, policy=policy)
+    pool.registerGroup(groupID, TestWorker)
+
+    refs = []
+    for i in range(3):
+        confRef, retRef0, retRef1 = testTaskTwo.remote(i)
+        ret1 = ray.get(retRef1)
+        if ret1 != i*10:
+            print(f"Test Failed: Wrapped task returned wrong value. Expected {i*10}, Got: {ret1}")
+
+        refs.append(pool.run(groupID, "returnOne", args=[retRef0], refDeps=[confRef]))
+
+    retRefs = [ray.get(ref) for ref in refs]
+    for expect, retRef in enumerate(retRefs):
+        ret = ray.get(retRef)
+        if expect != ret:
+            print(f"Test Failed: expected '{expect}', got '{ret}'")
+            success = False
+
+    pool.shutdown()
+
+    return success
+
 POLICY = kaas.pool.policies.EXCLUSIVE
 
 if __name__ == "__main__":
-    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress']
+    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm']
 
     parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
     parser.add_argument('-t', '--test', action='append', choices=availableTests + ['all'])
@@ -258,6 +317,8 @@ if __name__ == "__main__":
             ret = testProfs(policy)
         elif test == 'stress':
             ret = testStress(policy, gpu=True)
+        elif test == 'confirm':
+            ret = testConfirmMultiRet(policy)
         else:
             raise ValueError("Unrecognized test: ", test)
 
