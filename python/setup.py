@@ -13,7 +13,7 @@ if shutil.which('nvcc') is None:
 else:
     sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/cutlass', check=True)
     sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'kaas/complexCutlass', check=True)
-sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'test/kerns', check=True)
+    sp.run(['make'], cwd=pathlib.Path(__file__).parent / 'test/kerns', check=True)
 
 with open("../README.md", "r") as fh:
     long_description = fh.read()

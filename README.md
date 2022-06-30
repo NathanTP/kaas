@@ -10,6 +10,9 @@ effect, KaaS functions represent an alternative task type for Ray. They are
 described by a request object rather than a python function, but otherwise
 behave similarly to Ray tasks.
 
+# Installation
+    pip install -e python
+
 # Request Format
 
 ## Top Level Request
