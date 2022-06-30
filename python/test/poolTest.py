@@ -320,6 +320,7 @@ class TestLooper():
         IOLoop.current().add_callback(self.gatherResponses)
 
     async def groupSubmit(self, groupID, runtime, rate=1):
+        print(f"Group {groupID} submitting at rate {rate} with ideal latency {runtime}")
         while time.time() < self.stopTime:
             self.pool.run(groupID, 'delay', args=[[groupID, time.time()], runtime],
                           kwargs={'respQ': self.rayQ})
@@ -362,6 +363,7 @@ def testFairness(policy):
         gP50s.append(np.quantile(npLats, 0.5))
         gP90s.append(np.quantile(npLats, 0.9))
 
+    print([groupID for groupID in testLoop.groupLats.keys()])
     print("P50s")
     print(gP50s)
     print("P90s")
