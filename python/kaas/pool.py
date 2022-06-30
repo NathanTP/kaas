@@ -652,6 +652,9 @@ class Pool():
         if self.dead:
             raise PoolError("Pool has been shutdown")
 
+        if refDeps is None:
+            refDeps = []
+
         return self.pool.run.options(num_returns=num_returns).\
             remote(groupID, methodName, *refDeps, num_returns=num_returns, args=args, kwargs=kwargs)
 
