@@ -299,27 +299,32 @@ class TestLooper():
         groups = ['g' + str(x) for x in range(nGroup)]
         self.rayQ = ray.util.queue.Queue()
 
+        self.rng = np.random.default_rng(0)
         self.nOutstanding = 0
         self.done = 0
 
         self.startTime = time.time()
         self.stopTime = self.startTime + duration
         self.groupLats = {}
+        # Theoretical peak throughput of the pool in requestSeconds/second
+        theoreticPeak = nWorker
+        # target submission rate per group in requestSeconds/second
+        groupBudget = theoreticPeak / nGroup
         for groupIdx, groupID in enumerate(groups):
             self.groupLats[groupID] = []
             self.pool.registerGroup(groupID, TestWorkerNoGPU)
-            runtime = (groupIdx + 1)*0.25
-            rate =
-            IOLoop.current().add_callback(self.groupSubmit, groupID, (groupIdx + 1)*0.25)
+            runtime = ((groupIdx + 1)**2)*0.25
+            rate = (groupBudget / runtime) * 0.8
+            IOLoop.current().add_callback(self.groupSubmit, groupID, runtime, rate=rate)
 
         IOLoop.current().add_callback(self.gatherResponses)
 
-    async def groupSubmit(self, groupID, runtime, rate=3):
+    async def groupSubmit(self, groupID, runtime, rate=1):
         while time.time() < self.stopTime:
             self.pool.run(groupID, 'delay', args=[[groupID, time.time()], runtime],
                           kwargs={'respQ': self.rayQ})
             self.nOutstanding += 1
-            await asyncio.sleep(1 / rate)
+            await asyncio.sleep(self.rng.exponential(rate))
 
         self.pool.run(groupID, 'delay', args=[[groupID, time.time()], runtime],
                       kwargs={'respQ': self.rayQ})
@@ -345,7 +350,7 @@ class TestLooper():
 def testFairness(policy):
     nWorker = nResource
     nGroup = 2
-    duration = 30
+    duration = 60
 
     testLoop = TestLooper(policy, nWorker, nGroup, duration)
     IOLoop.instance().start()
