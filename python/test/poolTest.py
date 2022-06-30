@@ -1,10 +1,14 @@
 #!/usr/bin/env python
 import ray
+import ray.util.queue
 from pprint import pprint  # NOQA
 import argparse
 import time
 import os
 import subprocess as sp
+import numpy as np
+from tornado.ioloop import IOLoop
+import asyncio
 
 import kaas.pool
 
@@ -70,8 +74,11 @@ class TestWorkerNoGPU(kaas.pool.PoolWorker):
         self.getProfs()['n_returnTwo'].increment(1)
         return True, arg
 
-    def delay(self, arg, sleepTime):
+    def delay(self, arg, sleepTime, respQ=None):
         time.sleep(sleepTime)
+        if respQ is not None:
+            respQ.put(arg)
+
         return arg
 
 
@@ -160,10 +167,7 @@ def testStress(policy, gpu=True):
 
     groups = ['g' + str(x) for x in range(nGroup)]
     for group in groups:
-        if gpu:
-            pool.registerGroup(group, worker)
-        else:
-            pool.registerGroup(group, worker)
+        pool.registerGroup(group, worker)
 
     retRefs = []
     args = []
@@ -282,10 +286,89 @@ def testConfirmMultiRet(policy):
 
     return success
 
+
+class TestLooper():
+    """ServerTask"""
+    def __init__(self, policy, nWorker, nGroup, duration):
+        self.nGroup = nGroup
+
+        self.loop = IOLoop.instance()
+        self.readyClients = []
+
+        self.pool = kaas.pool.Pool(nWorker, policy=policy)
+        groups = ['g' + str(x) for x in range(nGroup)]
+        self.rayQ = ray.util.queue.Queue()
+
+        self.nOutstanding = 0
+        self.done = 0
+
+        self.startTime = time.time()
+        self.stopTime = self.startTime + duration
+        self.groupLats = {}
+        for groupIdx, groupID in enumerate(groups):
+            self.groupLats[groupID] = []
+            self.pool.registerGroup(groupID, TestWorkerNoGPU)
+            runtime = (groupIdx + 1)*0.25
+            rate =
+            IOLoop.current().add_callback(self.groupSubmit, groupID, (groupIdx + 1)*0.25)
+
+        IOLoop.current().add_callback(self.gatherResponses)
+
+    async def groupSubmit(self, groupID, runtime, rate=3):
+        while time.time() < self.stopTime:
+            self.pool.run(groupID, 'delay', args=[[groupID, time.time()], runtime],
+                          kwargs={'respQ': self.rayQ})
+            self.nOutstanding += 1
+            await asyncio.sleep(1 / rate)
+
+        self.pool.run(groupID, 'delay', args=[[groupID, time.time()], runtime],
+                      kwargs={'respQ': self.rayQ})
+        self.nOutstanding += 1
+        self.done += 1
+
+    async def gatherResponses(self):
+        while self.done < self.nGroup:
+            groupID, submitTime = await self.rayQ.get_async()
+            self.groupLats[groupID].append(time.time() - submitTime)
+            self.nOutstanding -= 1
+
+        print("Done with main loop, cleaning up any lingering reqs")
+        while self.nOutstanding > 0:
+            groupID, submitTime = await self.rayQ.get_async()
+            self.groupLats[groupID].append(time.time() - submitTime)
+            self.nOutstanding -= 1
+
+        print("Exiting test loop")
+        IOLoop.instance().stop()
+
+
+def testFairness(policy):
+    nWorker = nResource
+    nGroup = 2
+    duration = 30
+
+    testLoop = TestLooper(policy, nWorker, nGroup, duration)
+    IOLoop.instance().start()
+
+    gP50s = []
+    gP90s = []
+    for groupID, lats in testLoop.groupLats.items():
+        npLats = np.array(lats)
+        gP50s.append(np.quantile(npLats, 0.5))
+        gP90s.append(np.quantile(npLats, 0.9))
+
+    print("P50s")
+    print(gP50s)
+    print("P90s")
+    print(gP90s)
+
+    return True
+
+
 POLICY = kaas.pool.policies.EXCLUSIVE
 
 if __name__ == "__main__":
-    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm']
+    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm', 'fairness']
 
     parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
     parser.add_argument('-t', '--test', action='append', choices=availableTests + ['all'])
@@ -319,6 +402,8 @@ if __name__ == "__main__":
             ret = testStress(policy, gpu=True)
         elif test == 'confirm':
             ret = testConfirmMultiRet(policy)
+        elif test == 'fairness':
+            ret = testFairness(policy)
         else:
             raise ValueError("Unrecognized test: ", test)
 
