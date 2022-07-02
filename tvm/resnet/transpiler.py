@@ -7,12 +7,15 @@ grap = None
 
 storage = None
 
+def compute_size(array, ty):
+    return sizes[ty] * np.prod(array)
+
 def compare_size(size1, size2):
     if len(size1) != len(size2):
         #print("original node", "new node")
         #print(size1, size2)
         raise Exception("invalid assignment")
-    
+
     for i in range(len(size1)):
         if size1[i] > size2[i]:
             return False
@@ -24,19 +27,14 @@ def node_analysis(storage_map, alloc_map, graph, output_list):
     counter = 0
     new_counter = 0
     for i in range(len(store_list)):
-        new_size = np.array(graph['attrs']['shape'][1][i])
+        new_size_dims = np.array(graph['attrs']['shape'][1][i])
+        ty = graph['attrs']['dltype'][1][i]
+        new_size = compute_size(new_size_dims, ty)
         #print(i, store_list[i])
         if store_list[i] in alloc_map.keys():
-            try:
-                if compare_size(alloc_map[store_list[i]], new_size):
-                    alloc_map[store_list[i]] = new_size
-                storage_map[i] = store_list[i]
-            except:
-                #print("invalid assignment")
-                #don't set it to counter, need to account for throttling
-                alloc_map["n" + str(new_counter)] = new_size
-                storage_map[i] = "n" + str(new_counter)
-                new_counter += 1
+            if new_size > alloc_map[store_list[i]]:
+                alloc_map[store_list[i]] = new_size
+            storage_map[i] = store_list[i]
         else:
             alloc_map[counter] = new_size
             storage_map[i] = counter
@@ -100,7 +98,7 @@ def main(graph, code, metadata):
         if not node_num in created:
             create = True
             created.add(node_num)
-        
+
         #node_num = getNode(i)
         text += tab() + "# " + str(i) + ". " + node["name"] + "\n"
         if node["op"] == "null":
@@ -135,12 +133,12 @@ def main(graph, code, metadata):
                             if inout == "o":
                                 text += "(imm[" + tmp_map[name] + "], 't'), "
                             else:
-                                text += "(imm[" + tmp_map[name] + "], 'i'), " 
+                                text += "(imm[" + tmp_map[name] + "], 'i'), "
                     text = text[:-2]
                     text += "]\n"
                 else:
                     text += tab() + "arguments = [help]\n"
-                
+
                 text += tab() + "shapes = " + dims[dim_counter].replace(",", ", ")
                 text += tab() + "kerns.append(makeKern('" + kernels[node["name"]][j] + "', path, shapes, arguments))\n"
                 imm_count += 1
@@ -160,20 +158,20 @@ def main(graph, code, metadata):
                     if argList[k] == "o":
                         if i in output_list:
                             text += "(nodes[" + toString(node_num) + "], 'o'), "
-                        else:    
+                        else:
                             text += "(nodes[" + toString(node_num) + "], 't'), "
                     elif argList[k] == "i":
                         text += "(nodes[" + toString(storage_dict[node["inputs"][arg_counter][0]]) + "], 'i'), "
                         arg_counter += 1
                     else:
                         name = argList[k][0]
-                        text += "(imm[" + tmp_map[name] + "], 'i'), " 
-               
+                        text += "(imm[" + tmp_map[name] + "], 'i'), "
+
                 text = text[:-2]
                 text += "]\n"
             else:
                 text += tab() + "arguments = [help]\n"
-            
+
             text += tab() + "shapes = " + dims[dim_counter].replace(",", ", ")
             text += tab() + "kerns.append(makeKern('" + kernel_name + "', path, shapes, arguments))\n"
             dim_counter += 1
@@ -257,19 +255,19 @@ def getFuncDict():
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel2"] = [("k1", "i"), "o", "i"]
 
-    
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0"] = ["i", ("k0", "o")] 
+
+    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0"] = ["i", ("k0", "o")]
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel2"] = [("k1", "i"), "o", "i"]
 
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel0"] = ["i", ("k0", "o")]
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel2"] = [("k1", "i"), "o", "i"]
-    
+
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel0"] = ["i", ("k0", "o")]
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
     funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel2"] = [("k1", "i"), "o", "i"]
-    
+
     return funcDict
 
 
