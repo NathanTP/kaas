@@ -35,6 +35,7 @@ maxOutstanding = 256
 class policies(enum.IntEnum):
     BALANCE = enum.auto()
     EXCLUSIVE = enum.auto()
+    STATIC = enum.auto()
 
 
 class PoolError(Exception):
@@ -235,14 +236,15 @@ class BalancePolicy(Policy):
         or isolation between clients. Multiple clients may be registerd, but
         they must all use the same worker class.
             maxWorkers: Maximum number of concurrent workers to spawn
-            profLevel: Sets the degree of profiling to be performed (lower is less invasive)
+            profLevel: Sets the degree of profiling to be performed (lower is
+                less invasive)
             globalGroupID: The balance policy supports multiple groups
-            simultaneously. By default, it uses the provided per-request
-            groupID to measure some metrics per-group. If groupID is provided
-            here, all metrics (including policy-wide metrics) will be recorded
-            under that group.
+                simultaneously. By default, it uses the provided per-request
+                groupID to measure some metrics per-group. If groupID is
+                provided here, all metrics (including policy-wide metrics) will
+                be recorded under that group.
             strict: If true, the policy will reject any requests that can't be
-            scheduled rather than queuing them internally.
+                scheduled rather than queuing them internally.
         """
         self.strict = strict
         self.maxWorkers = maxWorkers
@@ -277,7 +279,8 @@ class BalancePolicy(Policy):
             # scale up
             self.profs['n_cold_start'].increment(delta)
             for i in range(delta):
-                worker = self.workerClass.remote(profLevel=self.profLevel, defaultGroup=self.globalGroupID)
+                worker = self.workerClass.remote(profLevel=self.profLevel,
+                                                 defaultGroup=self.globalGroupID)
 
                 self.freeWorkers[self.nextWID] = _WorkerState(worker, 0)
                 self.nextWID += 1
@@ -409,6 +412,98 @@ class BalancePolicy(Policy):
             confirmations.append(worker.actor._shutdown.remote())
 
         ray.wait(confirmations, num_returns=len(confirmations))
+
+
+class StaticPolicy(Policy):
+    def __init__(self, maxWorkers, profLevel=0):
+        """The static policy assigns workers to groups in a first-come-first
+        served basis and returns an error when maxWorkers is exceeded. This
+        policy cannot not re-balance clients or create/destroy workers after
+        initial creation. It supports non-integer resource requirements for
+        workers (must be <= 1)."""
+        self.maxResource = maxWorkers
+
+        # Number of resources assigned to workers (doesn't have to be an
+        # integer)
+        self.resourceUtilization = 0.0
+        self.numWorkers = 0
+
+        self.profLevel = profLevel
+        self.profTop = createProfiler(level=self.profLevel)
+        self.poolProfs = self.profTop.mod('pool')
+
+        # {groupID: BalancePolicy}
+        self.groups = {}
+
+    def registerGroup(self, groupID, workerClass: PoolWorker, nWorker=1, workerResources=1):
+        """Register a group with this policy.
+        Arguments:
+            groupID, workerClass: See the Policy ABC
+            nWorker: Number of workers assigned to this group, this number will
+                never change after registration.
+            workerResources: Number of resources consumed by workers for this
+                group. This must be <= 1.
+        """
+        requestedResources = workerResources * nWorker
+        if self.resourceUtilization + requestedResources > self.maxResource:
+            raise ValueError(f"Resources exhuasted, cannot register group: max={self.maxResource}, current={self.resourceUtilization}, requested={requestedResources}")
+
+        self.resourceUtilization += requestedResources
+
+        group = BalancePolicy(nWorker, globalGroupID=groupID, profLevel=self.profLevel)
+        group.registerGroup(groupID, workerClass)
+        self.groups[groupID] = group
+
+    def update(self, reqs=(), completedWorkers=()):
+        # Split into per-group updates
+        groupCompletions = collections.defaultdict(list)
+        for gID, wID in completedWorkers:
+            groupCompletions[gID].append(wID)
+
+        groupReqs = collections.defaultdict(list)
+        for req in reqs:
+            groupReqs[req.groupID].append(req)
+
+        # {gID: {fut: wID}}
+        groupRuns = collections.defaultdict(dict)
+
+        # Update all the groups
+        for gID, group in self.groups.items():
+            groupRuns[gID] = group.update(completedWorkers=groupCompletions[gID],
+                                          reqs=groupReqs[gID])
+
+        # Merge into a single list of new runs
+        newRuns = {}
+        for gID, runs in groupRuns.items():
+            for fut, wID in runs.items():
+                newRuns[fut] = (gID, wID)
+
+        return newRuns
+
+    async def getProfile(self):
+        """Schema: Each group get's it's own private pool so we report
+        per-group pool profs. Even though each pool only has one group, we
+        still report the per-group worker-specific stats per pool to match the
+        behavior of BALANCE.
+        """
+        workerProfs = self.profTop.mod('workers')
+        poolProfs = self.profTop.mod('pool')
+
+        groupPoolProfs = await asyncio.gather(*[group.getProfile() for group in self.groups.values()])
+
+        for groupID, groupProf in zip(self.groups.keys(), groupPoolProfs):
+            poolProfs.merge(groupProf.mod('pool'))
+            workerProfs.merge(groupProf.mod('workers'))
+
+        latestProfs = self.profTop
+        self.profTop = createProfiler(level=self.profLevel)
+        self.profs = self.profTop.mod('pool')
+
+        return latestProfs
+
+    def shutdown(self):
+        for group in self.groups.values():
+            group.shutdown()
 
 
 class ExclusivePolicy(Policy):
@@ -601,7 +696,7 @@ class Pool():
         types and other fairness properties.
     """
 
-    def __init__(self, maxWorkers, policy=policies.BALANCE, profLevel=0):
+    def __init__(self, maxWorkers, policy=policies.BALANCE, profLevel=0, policyArgs: dict = {}):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow. If
             there are multiple nodes in the system, each node will get an even
@@ -611,16 +706,20 @@ class Pool():
         self.profile = None
         self.dead = False
 
-        self.pool = _PoolActor.remote(maxWorkers, policy=policy, profLevel=profLevel)
+        self.pool = _PoolActor.remote(maxWorkers, policy=policy, profLevel=profLevel, policyArgs=policyArgs)
 
-    def registerGroup(self, groupID, workerClass: PoolWorker):
+    def registerGroup(self, groupID, workerClass: PoolWorker, **policyArgs):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run().
+        Arguments:
+            groupID: Unique identifer for this tenant/worker/group
+            workerClass: This will be used by the pool to run requests for this group
+            policyArgs: Some scheduling policies can take additional argumentskwargs for the policy
         """
         if self.dead:
             raise PoolError("Pool has been shutdown")
 
-        registerConfirm = self.pool.registerGroup.remote(groupID, workerClass)
+        registerConfirm = self.pool.registerGroup.remote(groupID, workerClass, **policyArgs)
         ray.get(registerConfirm)
 
     def registerGroupAsync(self, groupID, workerClass: PoolWorker):
@@ -689,7 +788,7 @@ class _PoolActor():
     completions via a "Done" reference. For each event, the Pool updates the
     Policy which handles the actual pool management and worker invocation."""
 
-    def __init__(self, maxWorkers, policy, profLevel=0):
+    def __init__(self, maxWorkers, policy, profLevel=0, policyArgs: dict = {}):
         """Arguments:
             maxWorkers: The total number of concurrent workers to allow
             policy: Scheduling policy class to use
@@ -704,9 +803,11 @@ class _PoolActor():
         self.idle.set()
 
         if policy is policies.BALANCE:
-            self.policy = BalancePolicy(maxWorkers, profLevel=profLevel)
+            self.policy = BalancePolicy(maxWorkers, profLevel=profLevel, **policyArgs)
         elif policy is policies.EXCLUSIVE:
-            self.policy = ExclusivePolicy(maxWorkers, profLevel=profLevel)
+            self.policy = ExclusivePolicy(maxWorkers, profLevel=profLevel, **policyArgs)
+        elif policy is policies.STATIC:
+            self.policy = StaticPolicy(maxWorkers, profLevel=profLevel, **policyArgs)
         else:
             raise PoolError("Unrecognized policy: " + str(policy))
 
@@ -722,10 +823,10 @@ class _PoolActor():
 
         self.loop.add_callback(self.handleEvent)
 
-    async def registerGroup(self, groupID, workerClass: PoolWorker):
+    async def registerGroup(self, groupID, workerClass: PoolWorker, **policyArgs):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run()."""
-        self.policy.registerGroup(groupID, workerClass)
+        self.policy.registerGroup(groupID, workerClass, **policyArgs)
 
     # run() keeps a Ray remote function alive for the caller so that it can
     # proxy the request to the pool and the response back to the caller. run()
