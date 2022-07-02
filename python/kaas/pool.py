@@ -279,7 +279,8 @@ class BalancePolicy(Policy):
             # scale up
             self.profs['n_cold_start'].increment(delta)
             for i in range(delta):
-                worker = self.workerClass.remote(profLevel=self.profLevel, defaultGroup=self.globalGroupID)
+                worker = self.workerClass.remote(profLevel=self.profLevel,
+                                                 defaultGroup=self.globalGroupID)
 
                 self.freeWorkers[self.nextWID] = _WorkerState(worker, 0)
                 self.nextWID += 1
@@ -707,7 +708,7 @@ class Pool():
 
         self.pool = _PoolActor.remote(maxWorkers, policy=policy, profLevel=profLevel, policyArgs=policyArgs)
 
-    def registerGroup(self, groupID, workerClass: PoolWorker, policyArgs: dict = {}):
+    def registerGroup(self, groupID, workerClass: PoolWorker, **policyArgs):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run().
         Arguments:
@@ -718,7 +719,7 @@ class Pool():
         if self.dead:
             raise PoolError("Pool has been shutdown")
 
-        registerConfirm = self.pool.registerGroup.remote(groupID, workerClass, policyArgs=policyArgs)
+        registerConfirm = self.pool.registerGroup.remote(groupID, workerClass, **policyArgs)
         ray.get(registerConfirm)
 
     def registerGroupAsync(self, groupID, workerClass: PoolWorker):
@@ -822,7 +823,7 @@ class _PoolActor():
 
         self.loop.add_callback(self.handleEvent)
 
-    async def registerGroup(self, groupID, workerClass: PoolWorker, policyArgs: dict = {}):
+    async def registerGroup(self, groupID, workerClass: PoolWorker, **policyArgs):
         """Register a new group of workers with this pool. Users must register
         at least one group before calling run()."""
         self.policy.registerGroup(groupID, workerClass, **policyArgs)

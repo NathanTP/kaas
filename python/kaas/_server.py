@@ -9,7 +9,6 @@ import time
 
 from . import cutlass
 from . import complexCutlass
-from . import kaas
 
 # NOTE on the PROFDISABLE comments: I hacked up a way to disable all the
 # cumbersome profiling and debugging code as needed. Even with python-level

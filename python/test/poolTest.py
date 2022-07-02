@@ -12,7 +12,7 @@ import kaas.pool
 nResource = 2
 
 
-def getNGpus():
+def getNGPUs():
     """Returns the number of available GPUs on this machine"""
     if "CUDA_VISIBLE_DEVICES" in os.environ:
         return len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
@@ -77,8 +77,9 @@ class TestWorkerNoGPU(kaas.pool.PoolWorker):
 
 def testMultiRet(policy):
     success = True
+    nGPUs = getNGPUs()
     groupID = "exampleGroup"
-    pool = kaas.pool.Pool(3, policy=policy)
+    pool = kaas.pool.Pool(nGPUs, policy=policy)
     pool.registerGroup(groupID, TestWorker)
 
     refs = []
@@ -109,7 +110,8 @@ def testMultiRet(policy):
 def testOneRet(policy, inputRef=False):
     success = True
     groupID = "exampleGroup"
-    pool = kaas.pool.Pool(3, policy=policy)
+    nGPUs = getNGPUs()
+    pool = kaas.pool.Pool(nGPUs, policy=policy)
     pool.registerGroup(groupID, TestWorker)
 
     refs = []
@@ -141,7 +143,7 @@ def testStress(policy, gpu=True):
     success = True
 
     if gpu:
-        nGPUs = getNGpus()
+        nGPUs = getNGPUs()
         if nGPUs is None:
             raise RuntimeError("gpu==True but there are no GPUs available")
         nWorker = nGPUs
@@ -160,10 +162,7 @@ def testStress(policy, gpu=True):
 
     groups = ['g' + str(x) for x in range(nGroup)]
     for group in groups:
-        if gpu:
-            pool.registerGroup(group, worker)
-        else:
-            pool.registerGroup(group, worker)
+        pool.registerGroup(group, worker)
 
     retRefs = []
     args = []
@@ -228,6 +227,37 @@ def testProfs(policy):
     return success
 
 
+def testStatic(policy, gpu=True):
+    if gpu:
+        nGPUs = getNGPUs()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nResource = nGPUs
+        worker = TestWorker.options(num_gpus=0.125)
+    else:
+        nResource = nResource
+        worker = TestWorkerNoGPU
+
+    nGroup = nResource * 8
+
+    pool = kaas.pool.Pool(nResource, policy=kaas.pool.policies.STATIC)
+
+    groups = ['g' + str(x) for x in range(nGroup)]
+    for group in groups:
+        pool.registerGroup(group, worker, nWorker=1, workerResources=0.125)
+
+    retRefs = []
+    for groupID in groups:
+        retRefs.append(pool.run(groupID, 'returnOne', args=['testInp']))
+
+    ray.get(ray.get(retRefs))
+
+    print(retRefs)
+
+    pool.shutdown()
+    return True
+
+
 def simple():
     pool = kaas.pool.Pool(0, policy=kaas.pool.policies.EXCLUSIVE)
     pool.shutdown()
@@ -282,14 +312,15 @@ def testConfirmMultiRet(policy):
 
     return success
 
+
 POLICY = kaas.pool.policies.EXCLUSIVE
 
 if __name__ == "__main__":
-    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm']
+    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm', 'static']
 
     parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
     parser.add_argument('-t', '--test', action='append', choices=availableTests + ['all'])
-    parser.add_argument('-p', '--policy', choices=['balance', 'exclusive'])
+    parser.add_argument('-p', '--policy', choices=['balance', 'exclusive', 'static'])
 
     args = parser.parse_args()
 
@@ -299,6 +330,8 @@ if __name__ == "__main__":
         policy = kaas.pool.policies.BALANCE
     elif args.policy == 'exclusive':
         policy = kaas.pool.policies.EXCLUSIVE
+    elif args.policy == 'static':
+        policy = kaas.pool.policies.STATIC
     else:
         raise ValueError("Unrecognized Policy: ", args.policy)
 
@@ -319,6 +352,8 @@ if __name__ == "__main__":
             ret = testStress(policy, gpu=True)
         elif test == 'confirm':
             ret = testConfirmMultiRet(policy)
+        elif test == 'static':
+            ret = testStatic(policy, gpu=True)
         else:
             raise ValueError("Unrecognized test: ", test)
 
