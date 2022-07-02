@@ -446,7 +446,7 @@ class StaticPolicy(Policy):
         """
         requestedResources = workerResources * nWorker
         if self.resourceUtilization + requestedResources > self.maxResource:
-            raise ValueError("Resources exhuasted, cannot register group")
+            raise ValueError(f"Resources exhuasted, cannot register group: max={self.maxResource}, current={self.resourceUtilization}, requested={requestedResources}")
 
         self.resourceUtilization += requestedResources
 
