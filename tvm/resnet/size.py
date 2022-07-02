@@ -10,9 +10,55 @@ sizes["int64"] = 8
 sizes["float32"] = 4
 sizes["int32"] = 4
 
+def compare_size(size1, size2):
+    if len(size1) != len(size2):
+        return False
+    
+    for i in range(len(size1)):
+        if size1[i] > size2[i]:
+            return False
+
+    return True
+
+
+
+def node_analysis(storage_dict, graph, output_list):
+   size_map = dict()
+   curr_owners = dict()
+   storage_dict[0] = 0
+   for i in range(1, len(graph["nodes"])):
+       found = False
+       new_size = np.array(graph['attrs']['shape'][1][i])
+       for node in size_map.keys():
+           if not node == 0 and not node in output_list and graph['attrs']['dltype'][1][node] == graph['attrs']['dltype'][1][i] and compare_size(size_map[node], new_size) and (not found or compare_size(new_size, size_map[storage_dict[i]])): #check dims:
+               bad = False
+               owner = curr_owners[node]
+               for j in range(i, len(graph["nodes"])):
+                   inputs = [x[0] for x in graph["nodes"][j]["inputs"]]
+                   if owner in inputs:
+                       bad = True
+                       break
+               #if not bad:
+               if not bad:
+                   storage_dict[i] = node
+                   found = True
+
+       if found:
+           curr_owners[storage_dict[i]] = i
+       if not found:
+           storage_dict[i] = i
+           curr_owners[i] = i
+           size_map[i] = new_size #sizes[ty] * np.prod(np.array(graph['attrs']['shape'][1][i]))
+   return size_map
+
+
+
 def computeMemory(ty, graph, i):
     return sizes[ty] * np.prod(np.array(graph['attrs']['shape'][1][i]))
 
+def computeMemory2(ty, array):
+    return sizes[ty] * np.prod(array)
+    
 
 if __name__ == "__main__":
     graph = getGraph()
@@ -36,16 +82,19 @@ if __name__ == "__main__":
         if total > max_dims:
             max_dims = total
 
-
+    standard_kaas_memory = 0
     for i in range(len(nodes)):
         if nodes[i]["name"][0] == "p":
             const_memory += computeMemory(graph["attrs"]["dltype"][1][i], graph, i)
         else:
-            kaas_memory += computeMemory(graph["attrs"]["dltype"][1][i], graph, i)
+            standard_kaas_memory += computeMemory(graph["attrs"]["dltype"][1][i], graph, i)
             ident = storage_ids[i]
             if not (ident in storage):
                 storage.add(ident)
                 total_memory += computeMemory(graph["attrs"]["dltype"][1][i], graph, i)
+    size_map = node_analysis(dict(), graph, [167, 171])
+    for thing in size_map.keys():
+        kaas_memory += computeMemory2(graph['attrs']['dltype'][1][thing], size_map[thing])
     '''
     for i in range(len(storage_ids)):
         ident = storage_ids[i]
@@ -54,8 +103,9 @@ if __name__ == "__main__":
         else:
             total_memory += computeMemory(graph["attrs"]["dltype"][1][i], graph, i)
     '''
-    print(storage)
+    #print(storage)
     print("TVM memory: " + str(total_memory))
     print("Const memory: " + str(const_memory))
     print("Kaas memory: " + str(kaas_memory))
+    print("Standard Kaas memory: " + str(standard_kaas_memory))
     print("Max number of threads: " + str(max_dims))
