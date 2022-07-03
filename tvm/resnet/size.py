@@ -13,13 +13,15 @@ sizes["int32"] = 4
 def compare_size(size1, size2):
     if len(size1) != len(size2):
         return False
-    
+
     for i in range(len(size1)):
         if size1[i] > size2[i]:
             return False
 
     return True
 
+def compute_size(array, ty):
+    return sizes[ty] * np.prod(array)
 
 
 def node_analysis(storage_dict, graph, output_list):
@@ -52,13 +54,30 @@ def node_analysis(storage_dict, graph, output_list):
    return size_map
 
 
+def node_analysis(storage_map, alloc_map, graph, output_list):
+    store_list = graph["attrs"]["storage_id"][1]
+    counter = 0
+    new_counter = 0
+    for i in range(len(store_list)):
+        new_size_dims = np.array(graph['attrs']['shape'][1][i])
+        ty = graph['attrs']['dltype'][1][i]
+        new_size = compute_size(new_size_dims, ty)
+        #print(i, store_list[i])
+        if store_list[i] in alloc_map.keys():
+            if new_size > alloc_map[store_list[i]]:
+                alloc_map[store_list[i]] = new_size
+            storage_map[i] = store_list[i]
+        else:
+            alloc_map[counter] = new_size
+            storage_map[i] = counter
+            counter += 1
 
 def computeMemory(ty, graph, i):
     return sizes[ty] * np.prod(np.array(graph['attrs']['shape'][1][i]))
 
 def computeMemory2(ty, array):
     return sizes[ty] * np.prod(array)
-    
+
 
 if __name__ == "__main__":
     graph = getGraph()
@@ -92,9 +111,12 @@ if __name__ == "__main__":
             if not (ident in storage):
                 storage.add(ident)
                 total_memory += computeMemory(graph["attrs"]["dltype"][1][i], graph, i)
-    size_map = node_analysis(dict(), graph, [167, 171])
+    size_map = dict()
+    storage_map = dict()
+    node_analysis(storage_map, size_map, graph, [167, 171])
+    print(size_map)
     for thing in size_map.keys():
-        kaas_memory += computeMemory2(graph['attrs']['dltype'][1][thing], size_map[thing])
+        kaas_memory += size_map[thing]
     '''
     for i in range(len(storage_ids)):
         ident = storage_ids[i]

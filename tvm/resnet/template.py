@@ -30,10 +30,7 @@ def createReq(params, cubinPath, mode='direct'):
     kerns = []
     path = cubinPath
     inp = np.zeros((1, 3, 224, 224))
-    nodes.append(addToKV(0, inp, const=False, ephemeral=False))
-    # storage = dict()
-    # storage['0'] = nodes[0]
-
+    nodes[0] = addToKV(0, inp, const=False, ephemeral=False)
     # 1. p0
     nodes[1] = addToKV(1, params['p0'])
 
@@ -42,7 +39,7 @@ def createReq(params, cubinPath, mode='direct'):
 
     # 3. fused_nn_conv2d_add_nn_relu_11
     # kernel 0
-    output_size = 12845056
+    output_size = 3211264
     nodes[3] = kaas.bufferSpec('3', output_size, const=True, ephemeral=True)
     arguments = [(nodes[0], 'i'), (nodes[1], 'i'), (nodes[3], 't'), (nodes[2], 'i')]
     shapes = [(1, 112, 1), (16, 1, 8)]
@@ -50,7 +47,7 @@ def createReq(params, cubinPath, mode='direct'):
 
     # 4. fused_nn_max_pool2d
     # kernel 0
-    output_size = 12845056
+    output_size = 3211264
     nodes[4] = kaas.bufferSpec('4', output_size, const=True, ephemeral=True)
     arguments = [(nodes[3], 'i'), (nodes[4], 't')]
     shapes = [(196, 1, 1), (1024, 1, 1)]
@@ -79,17 +76,17 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a0', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["3"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[3], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a1', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["7"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[7], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 2, 36), (98, 2, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel1', path, shapes, arguments))
     # kernel 2
-    output_size = 12845056
+    output_size = 3211264
     nodes[9] = kaas.bufferSpec('9', output_size, const=True, ephemeral=True)
     arguments = [(imm[1], 'i'), (nodes[9], 't'), (nodes[8], 'i')]
     shapes = [(98, 1, 1), (128, 1, 1)]
@@ -142,13 +139,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a2', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["9"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[9], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a3', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["16"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[16], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 2, 36), (98, 2, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel1', path, shapes, arguments))
     # kernel 2
@@ -191,13 +188,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a4', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["3"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[3], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a5', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["22"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[22], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 2, 36), (98, 2, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel1', path, shapes, arguments))
     # kernel 2
@@ -288,13 +285,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a6', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["9"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[9], 'i'), (imm[0], 't')]
     shapes = [(196, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a7', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["36"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[36], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(2, 4, 16), (49, 4, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel1', path, shapes, arguments))
     # kernel 2
@@ -337,13 +334,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a8', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["4"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[4], 'i'), (imm[0], 't')]
     shapes = [(196, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a9', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["42"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[42], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(2, 4, 16), (49, 4, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel1', path, shapes, arguments))
     # kernel 2
@@ -386,13 +383,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a10', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["3"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[3], 'i'), (imm[0], 't')]
     shapes = [(196, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a11', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["48"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[48], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(2, 4, 16), (49, 4, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel1', path, shapes, arguments))
     # kernel 2
@@ -483,13 +480,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a12', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["4"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[4], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a13', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["62"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[62], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 16, 16), (49, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel1', path, shapes, arguments))
     # kernel 2
@@ -532,13 +529,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a14', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["9"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[9], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a15', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["68"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[68], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 16, 16), (49, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel1', path, shapes, arguments))
     # kernel 2
@@ -581,13 +578,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a16', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["3"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[3], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a17', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["74"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[74], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 16, 16), (49, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel1', path, shapes, arguments))
     # kernel 2
@@ -630,13 +627,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a18', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["4"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[4], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a19', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["80"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[80], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 16, 16), (49, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel1', path, shapes, arguments))
     # kernel 2
@@ -679,13 +676,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a20', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["9"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[9], 'i'), (imm[0], 't')]
     shapes = [(98, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a21', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["86"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[86], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 16, 16), (49, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel1', path, shapes, arguments))
     # kernel 2
@@ -725,7 +722,7 @@ def createReq(params, cubinPath, mode='direct'):
 
     # 136. fused_nn_conv2d_add_nn_relu_1
     # kernel 0
-    output_size = 401408
+    output_size = 100352
     nodes[94] = kaas.bufferSpec('94', output_size, const=True, ephemeral=True)
     arguments = [(nodes[3], 'i'), (nodes[92], 'i'), (nodes[94], 't'), (nodes[93], 'i')]
     shapes = [(1, 1, 8), (1, 7, 32)]
@@ -778,17 +775,17 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a22', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["94"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[94], 'i'), (imm[0], 't')]
     shapes = [(64, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a23', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["101"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[101], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 8, 16), (8, 16, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel1', path, shapes, arguments))
     # kernel 2
-    output_size = 401408
+    output_size = 100352
     nodes[103] = kaas.bufferSpec('103', output_size, const=True, ephemeral=True)
     arguments = [(imm[1], 'i'), (nodes[103], 't'), (nodes[102], 'i')]
     shapes = [(64, 1, 1), (128, 1, 1)]
@@ -829,13 +826,13 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a24', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["94"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[94], 'i'), (imm[0], 't')]
     shapes = [(64, 1, 1), (128, 1, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel0', path, shapes, arguments))
     # kernel 1
     output_size = 1806336
     imm.append(kaas.bufferSpec('a25', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["108"], 'i'), (imm[0], 'i'), (imm[1], 't')]
+    arguments = [(nodes[108], 'i'), (imm[0], 'i'), (imm[1], 't')]
     shapes = [(1, 8, 16), (8, 16, 1)]
     kerns.append(makeKern('fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel1', path, shapes, arguments))
     # kernel 2
@@ -860,7 +857,7 @@ def createReq(params, cubinPath, mode='direct'):
     # kernel 0
     output_size = 1806336
     imm.append(kaas.bufferSpec('a26', output_size, const=True, ephemeral=True))
-    arguments = [(nodes["4"], 'i'), (imm[0], 't')]
+    arguments = [(nodes[4], 'i'), (imm[0], 't')]
     shapes = [(64, 1, 1), (32, 32, 1)]
     kerns.append(makeKern('fused_mean_kernel0', path, shapes, arguments))
     # kernel 1
@@ -882,7 +879,7 @@ def createReq(params, cubinPath, mode='direct'):
 
     # 165. fused_nn_dense_add
     # kernel 0
-    output_size = 16016
+    output_size = 4004
     nodes[114] = kaas.bufferSpec('114', output_size, const=True, ephemeral=True)
     arguments = [(nodes[103], 'i'), (nodes[112], 'i'), (nodes[114], 't'), (nodes[113], 'i')]
     shapes = [(1001, 1, 1), (64, 1, 1)]
@@ -890,7 +887,7 @@ def createReq(params, cubinPath, mode='direct'):
 
     # 166. fused_argmax
     # kernel 0
-    output_size = 16
+    output_size = 4
     nodes[115] = kaas.bufferSpec('115', output_size, const=True, ephemeral=True)
     arguments = [(nodes[114], 'i'), (nodes[115], 't')]
     shapes = [(1, 1, 1), (32, 32, 1)]
@@ -898,7 +895,7 @@ def createReq(params, cubinPath, mode='direct'):
 
     # 167. fused_cast
     # kernel 0
-    output_size = 64
+    output_size = 8
     nodes[116] = kaas.bufferSpec('116', output_size, const=True, ephemeral=True)
     arguments = [(nodes[116], 'o'), (nodes[115], 'i')]
     shapes = [(1, 1, 1), (1, 1, 1)]
@@ -912,7 +909,7 @@ def createReq(params, cubinPath, mode='direct'):
 
     # 169. fused_subtract_exp
     # kernel 0
-    output_size = 16016
+    output_size = 4004
     nodes[117] = kaas.bufferSpec('117', output_size, const=True, ephemeral=True)
     arguments = [(nodes[117], 't'), (nodes[114], 'i'), (nodes[115], 'i')]
     shapes = [(1, 1, 1), (1001, 1, 1)]

@@ -23,6 +23,16 @@ def compare_size(size1, size2):
     return True
 
 def node_analysis(storage_map, alloc_map, graph, output_list):
+    '''
+    store_list = graph["attrs"]["storage_id"][1]
+    for i in range(len(store_list)):
+        storage_map[i] = i
+        ty = graph['attrs']['dltype'][1][i]
+        new_size_dims = np.array(graph['attrs']['shape'][1][i])
+        alloc_map[i] = compute_size(new_size_dims, ty)
+    return
+    '''
+
     store_list = graph["attrs"]["storage_id"][1]
     counter = 0
     new_counter = 0
@@ -55,7 +65,7 @@ def main(graph, code, metadata):
     funcs = metadata["func_info"].keys()
     graph = json.load(open(graph))
     kernels = dict()
-    for i in range(1, len(graph["nodes"])):
+    for i in range(3, len(graph["nodes"])):
         op = graph["nodes"][i]["op"]
         name = graph["nodes"][i]["name"]
         if op == "null":
@@ -88,10 +98,11 @@ def main(graph, code, metadata):
     storage_dict = dict()
     alloc_map = dict()
     node_analysis(storage_dict, alloc_map, graph, output_list)
+    split_nodes = dict()
     print(storage_dict)
 
 
-    for i in range(1, len(graph["nodes"])):
+    for i in range(3, len(graph["nodes"])):
         node = graph["nodes"][i]
         node_num = storage_dict[i]
         create = False
@@ -105,7 +116,43 @@ def main(graph, code, metadata):
             text += tab() + "nodes[" + str(node_num) + "] = addToKV(" + str(node_num) + ", params[" + "'" + node['name'] + "'" + "])\n"
             #created.add(node_num)
         elif node["attrs"]["func_name"] == "__nop":
-            text += tab() + "nodes[" + str(node_num) + "] = nodes[" + str(getNode(node["inputs"][0][0])) + "]\n"
+            text += tab() + "nodes[" + str(node_num) + "] = nodes[" + str(storage_dict[node["inputs"][0][0]]) + "]\n"
+        elif "split" in node["name"]:
+            for j in range(len(kernels[node["name"]])):
+                kernel_name = kernels[node["name"]][j]
+                argList = funcDict[kernel_name]
+                for k in range(len(argList)):
+                    if "o" in argList[k]:
+                        number = argList[k][1]
+                        node_name = toString(str(node_num) + "_" + number)
+                        break
+                text += tab() + "# kernel " + str(j) + "\n"
+                ty = graph['attrs']['dltype'][1][i]
+                split_nodes[node_num] = 0
+                #if create:
+                text += tab() + "output_size = " + str(alloc_map[node_num]) + "\n"
+                text += tab() + "nodes[" + node_name + "] = kaas.bufferSpec('" + node_name + "', output_size, const=False, ephemeral=True)\n"
+                created.add(node_num)
+                if kernel_name in funcDict.keys():
+                    text += tab() + "arguments = ["
+                    arg_counter = 0
+                    for k in range(len(argList)):
+                        if "o" in argList[k]:
+                            if i in output_list:
+                                text += "(nodes[" + node_name + "], 'o'), "
+                            else:
+                                text += "(nodes[" + node_name + "], 't'), "
+                        elif argList[k] == "i":
+                            text += "(nodes[" + str(storage_dict[node["inputs"][arg_counter][0]]) + "], 'i'), "
+                            arg_counter += 1
+
+                    text = text[:-2]
+                    text += "]\n"
+
+                    text += tab() + "shapes = " + dims[dim_counter].replace(",", ", ")
+                    text += tab() + "kerns.append(makeKern('" + kernel_name + "', path, shapes, arguments))\n"
+
+
         else:
             if len(kernels[node["name"]]) > 1:
                 text += tab() + "imm = []\n"
@@ -114,8 +161,8 @@ def main(graph, code, metadata):
             arg_counter = 0
             for j in range(len(kernels[node["name"]]) - 1):
                 text += tab() + "# kernel " + str(j) + "\n"
-                text += tab() + "output_size = 1806336\n"
-                text += tab() + "imm.append(kaas.bufferSpec('a" + str(imm_count) + "', output_size, const=True, ephemeral=True))\n"
+                text += tab() + "output_size = 4096\n"
+                text += tab() + "imm.append(kaas.bufferSpec('a" + str(imm_count) + "', output_size, const=False, ephemeral=True))\n"
                 if kernels[node["name"]][j] in funcDict.keys():
                     text += tab() + "arguments = ["
                     argList = funcDict[kernels[node["name"]][j]]
@@ -148,7 +195,7 @@ def main(graph, code, metadata):
             ty = graph['attrs']['dltype'][1][i]
             if create:
                 text += tab() + "output_size = " + str(alloc_map[node_num]) + "\n"
-                text += tab() + "nodes[" + str(node_num) + "] = kaas.bufferSpec('" + str(node_num) + "', output_size, const=True, ephemeral=True)\n"
+                text += tab() + "nodes[" + str(node_num) + "] = kaas.bufferSpec('" + str(node_num) + "', output_size, const=False, ephemeral=True)\n"
                 created.add(node_num)
             kernel_name = kernels[node["name"]][len(kernels[node["name"]]) - 1]
             if kernel_name in funcDict.keys():
@@ -161,7 +208,12 @@ def main(graph, code, metadata):
                         else:
                             text += "(nodes[" + str(node_num) + "], 't'), "
                     elif argList[k] == "i":
-                        text += "(nodes[" + str(storage_dict[node["inputs"][arg_counter][0]]) + "], 'i'), "
+                        input_node_num = node["inputs"][arg_counter][0]
+                        if input_node_num in split_nodes.keys():
+                            text += "(nodes[" + toString(str(storage_dict[input_node_num]) + "_" + str(split_nodes[input_node_num])) + "], 'i'), "
+                            split_nodes[input_node_num] += 1
+                        else:
+                            text += "(nodes[" + str(storage_dict[input_node_num]) + "], 'i'), "
                         arg_counter += 1
                     else:
                         name = argList[k][0]
@@ -215,59 +267,42 @@ def getEndingCode():
 
 def getFuncDict():
     funcDict = dict()
-    funcDict["fused_nn_conv2d_add_nn_relu_11_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_divide_kernel0"] = ["o", "i", "i"]
-    funcDict["fused_nn_dense_add_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_nn_relu_7_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_nn_relu_10_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_mean_kernel1"] = ["o", ("k", "i")]
-    funcDict["fused_nn_max_pool2d_kernel0"] = ["i", "o"]
-    funcDict["fused_nn_conv2d_add_nn_relu_6_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_max_kernel0"] = ["i", "o"]
-    funcDict["fused_nn_conv2d_add_nn_relu_5_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_nn_relu_9_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_mean_kernel0"] = ["i", ("k", "o")]
-    funcDict["fused_nn_conv2d_add_nn_relu_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_3_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_add_nn_relu_kernel0"] = ["i", "i", "o", "i", "i"]
-    funcDict["fused_nn_conv2d_add_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_nn_relu_2_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_1_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_argmax_kernel0"] = ["i", "o"]
-    funcDict["fused_nn_conv2d_add_add_nn_relu_2_kernel0"] = ["i", "i", "o", "i", "i"]
-    funcDict["fused_nn_conv2d_add_nn_relu_8_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_squeeze_nn_batch_flatten_kernel0"] = ["o", "i"]
+    funcDict["fused_reshape_add_reshape_transpose_reshape_transpose_1_kernel0"] = ["o", "i", "i"]
+    funcDict["fused_nn_batch_matmul_4_kernel0"] = ["i", "i", "o"]
+    funcDict["fused_nn_batch_matmul_5_kernel0"] = ["i", "i", "o"]
+    funcDict["fused_nn_batch_matmul_2_kernel0"] = ["i", "i", "o"]
+    funcDict["fused_add_sqrt_divide_multiply_add_reshape_kernel0"] = ["o", "i", "i", "i", "i"]
+    funcDict["fused_mean_kernel0"] = ["i", ("k0", "o")]
+    funcDict["fused_mean_kernel1"] = ["o", ("k0", "i")]
+
+    funcDict["fused_expand_dims_expand_dims_cast_subtract_multiply_kernel0"] = ["o", "i"]
+    funcDict["fused_less_add_where_take_add_less_add_where_take_add_kernel0"] = ["o", "i", "i", "i", "i", "i"]
+
+    funcDict["fused_add_sqrt_divide_multiply_add_kernel0"] = ["o", "i", "i", "i", "i"]
+    funcDict["fused_reshape_add_reshape_transpose_reshape_kernel0"] = ["o", "i", "i"]
     funcDict["fused_subtract_exp_kernel0"] = ["o", "i", "i"]
-    funcDict["fused_nn_conv2d_add_nn_relu_4_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_2_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_add_nn_relu_1_kernel0"] = ["i", "i", "o", "i", "i"]
-    funcDict["fused_nn_conv2d_add_add_nn_relu_3_kernel0"] = ["i", "i", "o", "i", "i"]
-
+    funcDict["fused_divide_reshape_kernel0"] = ["o", "i", "i"]
     funcDict["fused_sum_kernel0"] = ["i", "o"]
+    funcDict["fused_squeeze_kernel0"] = ["o", "i"]
+    funcDict["fused_nn_batch_matmul_1_kernel0"] = ["i", "i", "o"]
+    funcDict["fused_nn_batch_matmul_3_kernel0"] = ["i", "i", "o"]
+    funcDict["fused_nn_batch_matmul_kernel0"] = ["i", "i", "o"]
+    funcDict["fused_reshape_add_add_kernel0"] = ["o", "i", "i", "i"]
+    funcDict["fused_reshape_transpose_reshape_kernel0"] = ["o", "i"]
+    funcDict["fused_reshape_divide_add_kernel0"] = ["o", "i", "i"]
+    funcDict["fused_max_kernel0"] = ["i", "o"]
 
-    funcDict["fused_cast_kernel0"] = ["o", "i"]
+    funcDict["fused_power_mean_kernel0"] = ["i", ("k0", "o")]
+    funcDict["fused_power_mean_kernel1"] = ["o", ("k0", "i")]
 
-    funcDict["fused_nn_conv2d_add_nn_relu_3_kernel0"] = ["i", "i", "o", "i"]
-    funcDict["fused_nn_conv2d_add_nn_relu_1_kernel0"] = ["i", "i", "o", "i"]
-
-
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel0"] = ["i", ("k0", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_2_kernel2"] = [("k1", "i"), "o", "i"]
+    funcDict["fused_reshape_add_split_kernel0"] = ["o1", "i", "i"]
+    funcDict["fused_reshape_add_split_kernel1"] = ["o0", "i", "i"]
 
 
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel0"] = ["i", ("k0", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_1_kernel2"] = [("k1", "i"), "o", "i"]
-
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel0"] = ["i", ("k0", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_kernel2"] = [("k1", "i"), "o", "i"]
-
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel0"] = ["i", ("k0", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel1"] = ["i", ("k0", "i"), ("k1", "o")]
-    funcDict["fused_nn_contrib_conv2d_winograd_without_weight_transform_add_nn_relu_3_kernel2"] = [("k1", "i"), "o", "i"]
-
+    funcDict["fused_reshape_add_multiply_divide_erf_add_multiply_reshape_kernel0"] = ["o", "i", "i"]
+    funcDict["fused_reshape_add_reshape_transpose_reshape_transpose_kernel0"] = ["o", "i", "i"]
+    funcDict["fused_subtract_kernel0"] = ["o", "i", "i"]
+    funcDict["fused_squeeze_1_kernel0"] = ["o", "i"]
     return funcDict
 
 
@@ -303,11 +338,16 @@ def createReq(params, cubinPath, mode='direct'):
     nodes = dict()
     kerns = []
     path = cubinPath
-    inp = np.zeros((1, 3, 224, 224))
+    inp = np.zeros((1, 384))
     nodes[0] = addToKV(0, inp, const=False, ephemeral=False)
+
+    # 1. input_mask
+    nodes[1] = addToKV(1, np.zeros((1, 384)), const=False)
+    # 2. segment_ids
+    nodes[2] = addToKV(2, np.zeros((1, 384)), const=False)
 """
     return code
 
 
 if __name__ == "__main__":
-    main("resInfo/res.txt", "code.cubin", "tvm_meta.json")
+    main("bertInfo/graph.json", "code.cubin", "bert/bert_meta.tvm_meta.json")
