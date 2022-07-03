@@ -10,6 +10,7 @@ import pickle
 import json
 from infbench import bert
 
+import numpy as np
 
 def getInput():
     vocab = open("bert/vocab.txt", 'r').read()
@@ -38,7 +39,7 @@ inp = pre(loader.get(0))[0]
 '''
 graphMod = tvm.runtime.load_module("bert/bert.so")
 
-data, vocab = getInput()
+#data, vocab = getInput()
 
 f = open('bert/bert_graph.json', 'r')
 
@@ -46,24 +47,31 @@ model = graph_executor.create(f.read(), graphMod, tvm.cuda())
 f.close()
 
 
-loader = bert.bertLoader(pathlib.Path.cwd() / "bertData")
+#loader = bert.bertLoader(pathlib.Path.cwd() / "bertData")
 
-inputs = loader.get(0)
+#inputs = loader.get(0)
 
 #print(data)
 #print(type(data))
 
 constants = bert.bertModel.getConstants(pathlib.Path.cwd())
 
-pre_input = constants + [inputs[0]]
+#pre_input = constants + [inputs[0]]
 
-pre_output = bert.bertModel.pre(pre_input)
+#pre_output = bert.bertModel.pre(pre_input)
 
 #new_inp = np.frombuffer(pre_output[0], dtype=np.int64)
 
-print(type(pre_output[1]))
+#print(type(pre_output[1]))
 
 #graph_inputs = [np.frombuffer(array, dtype=np.int64) for array in pre_output]
+
+pre_output = []
+pre_output.append(np.random.rand(1, 384, dtype=np.int64))
+pre_output.append(np.random.rand(1, 384, dtype=np.int64))
+pre_output.append(np.random.rand(1, 384, dtpye=np.int64))
+
+
 
 graph_inputs = []
 graph_inputs.append(np.frombuffer(pre_output[0], dtype=np.int64))
@@ -79,17 +87,17 @@ params = loadParams()
 for key in params.keys():
     model.set_input(key, tvm.nd.array(params[key]))
 
-#model.run()
+model.run()
 
-#output = tvm.nd.empty((1, 384), dtype="float32")
-#model.debug_get_output(1122, output)
+output = tvm.nd.empty((1, 384), dtype="float32")
+model.debug_get_output(1122, output)
 
-#print(output)
+print(output)
 
 #test = tvm.nd.empty((1, 384, 1), dtype='float32')
 #model.debug_get_output(23, test)
 #print(test)
-model.run()
+#model.run()
 
 '''
 inps = bert.bertModel.pre((vocab, data))

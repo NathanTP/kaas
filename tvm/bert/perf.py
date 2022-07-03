@@ -47,7 +47,7 @@ model = graph_executor.GraphModule(graphMod['default'](tvm.cuda()))
 f.close()
 
 
-loader = bert.bertLoader(pathlib.Path.cwd() / "bertData")
+#loader = bert.bertLoader(pathlib.Path.cwd() / "bertData")
 
 inputs = loader.get(0)
 
