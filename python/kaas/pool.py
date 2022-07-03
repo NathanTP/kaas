@@ -32,10 +32,13 @@ maxOutstanding = 256
 
 
 # Policy name constants
-class policies(enum.IntEnum):
-    BALANCE = enum.auto()
-    EXCLUSIVE = enum.auto()
-    STATIC = enum.auto()
+class policies(str, enum.Enum):
+    BALANCE = 'balance'
+    EXCLUSIVE = 'exclusive'
+    STATIC = 'static'
+    # BALANCE = enum.auto()
+    # EXCLUSIVE = enum.auto()
+    # STATIC = enum.auto()
 
 
 class PoolError(Exception):
