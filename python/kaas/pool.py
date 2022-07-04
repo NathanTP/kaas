@@ -316,7 +316,8 @@ class BalancePolicy(Policy):
         """The BalancePolicy initializes the maximum number of workers as soon
         as the first worker type is registered and never messes with them
         again. It does not distinguish between groupIDs because there will
-        only ever be one worker class."""
+        only ever be one worker class.
+        """
         if self.workerClass is None:
             self.workerClass = workerClass
         elif self.workerClass.__class__ != workerClass.__class__:
@@ -417,6 +418,140 @@ class BalancePolicy(Policy):
         ray.wait(confirmations, num_returns=len(confirmations))
 
 
+# Note: this is currently only used for the StaicPolicy, it probably isn't too
+# suitable for using directly.
+class StaticBalancePolicy(Policy):
+    def __init__(self, maxWorkers, profLevel=0, globalGroupID=None):
+        """Like balance but only supports a static set of workers. You can
+        register multiple groups if you want, but later groups won't have any
+        affect on the policy.
+        Arguments:
+            maxWorkers: Ignored. Here for compatibility with the Policy ABC,
+            only the resource request for the first registered group
+            matters.
+        """
+        self.profLevel = profLevel
+        self.globalGroupID = globalGroupID
+        self.initProfs()
+
+        # References to profiling data from killed workers
+        self.pendingProfs = []
+
+        # {workerID: _WorkerState}
+        self.freeWorkers = {}  # ready to recieve a request
+        self.busyWorkers = {}  # currently running a request
+        self.pendingReqs = collections.deque()
+
+    def initProfs(self):
+        self.profTop = createProfiler(self.profLevel)
+        if self.globalGroupID is None:
+            self.profs = self.profTop.mod('pool')
+        else:
+            self.profs = self.profTop.mod('pool').mod('groups').mod(self.globalGroupID)
+
+    def registerGroup(self, groupID, workerClass: PoolWorker, workerResources=1):
+        """The BalancePolicy initializes the maximum number of workers as soon
+        as the first worker type is registered and never messes with them
+        again. It does not distinguish between groupIDs because there will
+        only ever be one worker class.
+        Arguments:
+            workerResources: List of (threadFrac, resFrac) resources used per
+            client. If it is an integer, that many workers will be created with
+            one full GPU worth of requirements.
+        """
+        if len(self.freeWorkers) == 0 and len(self.busyWorkers) == 0:
+            if isinstance(workerResources, int):
+                workerResources = [(1.0, 1.0)]*workerResources
+
+            for wID, resource in enumerate(workerResources):
+                threadFrac = resource[0]
+                resFrac = resource[1]
+                gpuFrac = max(threadFrac, resFrac)
+                envArg = {'env_vars': {'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE': str(threadFrac*100)}}
+                worker = workerClass.options(num_gpus=gpuFrac, runtime_env=envArg) \
+                                    .remote(profLevel=self.profLevel,
+                                            defaultGroup=self.globalGroupID)
+                self.freeWorkers[wID] = _WorkerState(worker, 0)
+
+    def update(self, reqs=(), completedWorkers=()):
+        """The balance policy will try to run requests if possible, but if
+        there are no free workers, it may queue them up pending new
+        completions.
+
+        Returns: (newRuns, rejectedReqs)
+            newRuns: {doneFuture: wID, ...}
+            rejectedReqs: [req]
+                Only returned if strict==True, otherwise only the newRuns dict
+                is returned.
+        """
+        if len(self.freeWorkers) == 0 and len(self.busyWorkers) == 0:
+            raise PoolError("No groups have been registered!")
+
+        for wID in completedWorkers:
+            doneWorker = self.busyWorkers.pop(wID)
+
+            doneWorker.nOutstanding -= 1
+            if doneWorker.nOutstanding == 0:
+                self.freeWorkers[wID] = doneWorker
+            else:
+                self.busyWorkers[wID] = doneWorker
+
+        self.pendingReqs += reqs
+
+        toSchedule = []
+        for i in range(min(len(self.freeWorkers), len(self.pendingReqs))):
+            toSchedule.append(self.pendingReqs.popleft())
+
+        newRuns = {}
+        for req in toSchedule:
+            wID, worker = self.freeWorkers.popitem()
+
+            logging.debug(f"Submitting request for group {req.groupID} to worker {wID}")
+            resRefs = worker.actor._runWithCompletion.options(
+                num_returns=req.num_returns + 1).remote(
+                req.fName, *req.args,
+                groupID=req.groupID, **req.kwargs)
+
+            worker.nOutstanding += 1
+            self.busyWorkers[wID] = worker
+
+            req.resFuture.set_result(resRefs[1:])
+            doneFut = asyncio.wrap_future(resRefs[1].future())
+            newRuns[doneFut] = wID
+
+        return newRuns
+
+    async def getProfile(self):
+        """Schema: There is only one pool so there are no per-group pool profs
+        (top-level pool profs are aggregated across all groups).
+
+        """
+        if len(self.busyWorkers) != 0:
+            raise PoolError("Cannot call getProfile() when there are pending requests")
+
+        for worker in self.freeWorkers.values():
+            self.pendingProfs.append(worker.actor._getProfile.remote())
+
+        workerStats = await asyncio.gather(*self.pendingProfs)
+        self.pendingProfs = []
+
+        workerProfs = self.profTop.mod('workers')
+        for workerStat in workerStats:
+            workerProfs.merge(workerStat)
+
+        latestProfs = self.profTop
+        self.initProfs()
+
+        return latestProfs
+
+    def shutdown(self):
+        confirmations = []
+        for worker in itertools.chain(self.freeWorkers.values(), self.busyWorkers.values()):
+            confirmations.append(worker.actor._shutdown.remote())
+
+        ray.wait(confirmations, num_returns=len(confirmations))
+
+
 class StaticPolicy(Policy):
     def __init__(self, maxWorkers, profLevel=0):
         """The static policy assigns workers to groups in a first-come-first
@@ -426,11 +561,6 @@ class StaticPolicy(Policy):
         workers (must be <= 1)."""
         self.maxResource = maxWorkers
 
-        # Number of resources assigned to workers (doesn't have to be an
-        # integer)
-        self.resourceUtilization = 0.0
-        self.numWorkers = 0
-
         self.profLevel = profLevel
         self.profTop = createProfiler(level=self.profLevel)
         self.poolProfs = self.profTop.mod('pool')
@@ -438,23 +568,22 @@ class StaticPolicy(Policy):
         # {groupID: BalancePolicy}
         self.groups = {}
 
-    def registerGroup(self, groupID, workerClass: PoolWorker, nWorker=1, workerResources=1):
+    def registerGroup(self, groupID, workerClass: PoolWorker, workerResources=1):
         """Register a group with this policy.
         Arguments:
             groupID, workerClass: See the Policy ABC
-            nWorker: Number of workers assigned to this group, this number will
-                never change after registration.
-            workerResources: Number of resources consumed by workers for this
-                group. This must be <= 1.
+            workerResources: List of (threadFrac, resFrac) resources used per
+            client. If it is an integer, that many workers will be created with
+            one full GPU worth of requirements..
         """
-        requestedResources = workerResources * nWorker
-        if self.resourceUtilization + requestedResources > self.maxResource:
-            raise ValueError(f"Resources exhuasted, cannot register group: max={self.maxResource}, current={self.resourceUtilization}, requested={requestedResources}")
+        if isinstance(workerResources, int):
+            workerResources = [(1.0, 1.0)]*workerResources
 
-        self.resourceUtilization += requestedResources
-
-        group = BalancePolicy(nWorker, globalGroupID=groupID, profLevel=self.profLevel)
-        group.registerGroup(groupID, workerClass)
+        logging.debug(f"Registering {groupID} with resources: {workerResources}")
+        group = StaticBalancePolicy(len(workerResources),
+                                    profLevel=self.profLevel,
+                                    globalGroupID=groupID)
+        group.registerGroup(groupID, workerClass, workerResources=workerResources)
         self.groups[groupID] = group
 
     def update(self, reqs=(), completedWorkers=()):
