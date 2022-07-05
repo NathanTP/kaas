@@ -224,10 +224,8 @@ def testProfs(policy, useGPU=False):
         nGPUs = getNGPUs()
         if nGPUs is None:
             raise RuntimeError("gpu==True but there are no GPUs available")
-        nWorkers = nGPUs
         worker = TestWorker
     else:
-        nWorkers = nResource
         worker = TestWorkerNoGPU
 
     success = True
@@ -259,34 +257,41 @@ def testProfs(policy, useGPU=False):
     return success
 
 
-def testStatic(policy, useGPU=False):
+def testFractional(policy, useGPU=False):
     if useGPU:
         nGPUs = getNGPUs()
         if nGPUs is None:
             raise RuntimeError("gpu==True but there are no GPUs available")
         nWorkers = nGPUs
         worker = TestWorker
+        resourceName = "GPU"
     else:
         nWorkers = nResource
         worker = TestWorkerNoGPU
+        resourceName = "testResource"
 
-    nGroup = nResource * 8
+    nGroup = nResource * 2
+    groupNWorker = 2
+    workerShare = nResource / (nGroup*groupNWorker)
+    groupResources = [(workerShare, workerShare)]
 
     pool = kaas.pool.Pool(nWorkers, policy=kaas.pool.policies.STATIC)
 
     groups = ['g' + str(x) for x in range(nGroup)]
     for group in groups:
-        pool.registerGroup(group, worker, nWorker=1, workerResources=0.125)
+        pool.registerGroup(group, worker, workerResources=groupResources,
+                           resourceName=resourceName)
 
     retRefs = []
     for groupID in groups:
         retRefs.append(pool.run(groupID, 'returnOne', args=['testInp']))
 
-    ray.get(ray.get(retRefs))
-
-    print(retRefs)
-
+    rets = ray.get(ray.get(retRefs))
     pool.shutdown()
+    for ret in rets:
+        if ret != "testInp":
+            return False
+
     return True
 
 
@@ -308,40 +313,7 @@ def testConfirm(policy, useGPU=False):
 
     success = True
     groupID = "exampleGroup"
-    pool = kaas.pool.Pool(3, policy=policy)
-    pool.registerGroup(groupID, worker)
-
-    refs = []
-    for i in range(3):
-        confRef, retRef = testTask.remote(i)
-        refs.append(pool.run(groupID, "returnOne", args=[retRef], refDeps=[confRef]))
-
-    retRefs = [ray.get(ref) for ref in refs]
-    for expect, retRef in enumerate(retRefs):
-        ret = ray.get(retRef)
-        if expect != ret:
-            print(f"Test Failed: expected '{expect}', got '{ret}'")
-            success = False
-
-    pool.shutdown()
-
-    return success
-
-
-def testConfirmMultiRet(policy, useGPU=False):
-    if useGPU:
-        nGPUs = getNGPUs()
-        if nGPUs is None:
-            raise RuntimeError("gpu==True but there are no GPUs available")
-        nWorkers = nGPUs
-        worker = TestWorker
-    else:
-        nWorkers = nResource
-        worker = TestWorkerNoGPU
-
-    success = True
-    groupID = "exampleGroup"
-    pool = kaas.pool.Pool(3, policy=policy)
+    pool = kaas.pool.Pool(nWorkers, policy=policy)
     pool.registerGroup(groupID, worker)
 
     refs = []
@@ -368,11 +340,12 @@ def testConfirmMultiRet(policy, useGPU=False):
 POLICY = kaas.pool.policies.EXCLUSIVE
 
 if __name__ == "__main__":
-    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm', 'static']
+    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm', 'fractional']
 
     parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
     parser.add_argument('-t', '--test', action='append', choices=availableTests + ['all'])
     parser.add_argument('-p', '--policy', choices=['balance', 'exclusive', 'static'])
+    parser.add_argument("--gpu", action='store_true', help="Use GPUs rather than the default custom resource")
 
     args = parser.parse_args()
 
@@ -387,26 +360,25 @@ if __name__ == "__main__":
     else:
         raise ValueError("Unrecognized Policy: ", args.policy)
 
-    if args.test == 'all':
+    if 'all' in args.test:
         tests = availableTests
     else:
         tests = args.test
 
-    useGPU = False
     for test in tests:
         print(f"Running with {args.policy}: {test}")
         if test == 'oneRet':
-            ret = testOneRet(policy, useGPU=useGPU)
+            ret = testOneRet(policy, useGPU=args.gpu)
         elif test == 'multiRet':
-            ret = testMultiRet(policy, useGPU=useGPU)
+            ret = testMultiRet(policy, useGPU=args.gpu)
         elif test == 'profiling':
-            ret = testProfs(policy, useGPU=useGPU)
+            ret = testProfs(policy, useGPU=args.gpu)
         elif test == 'stress':
-            ret = testStress(policy, useGPU=useGPU)
+            ret = testStress(policy, useGPU=args.gpu)
         elif test == 'confirm':
-            ret = testConfirmMultiRet(policy, useGPU=useGPU)
-        elif test == 'static':
-            ret = testStatic(policy, useGPU=useGPU)
+            ret = testConfirm(policy, useGPU=args.gpu)
+        elif test == 'fractional':
+            ret = testFractional(policy, useGPU=args.gpu)
         else:
             raise ValueError("Unrecognized test: ", test)
 

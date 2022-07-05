@@ -449,7 +449,7 @@ class StaticBalancePolicy(Policy):
         else:
             self.profs = self.profTop.mod('pool').mod('groups').mod(self.globalGroupID)
 
-    def registerGroup(self, groupID, workerClass: PoolWorker, workerResources=1):
+    def registerGroup(self, groupID, workerClass: PoolWorker, workerResources=1, resourceName='GPU'):
         """The BalancePolicy initializes the maximum number of workers as soon
         as the first worker type is registered and never messes with them
         again. It does not distinguish between groupIDs because there will
@@ -466,11 +466,16 @@ class StaticBalancePolicy(Policy):
             for wID, resource in enumerate(workerResources):
                 threadFrac = resource[0]
                 resFrac = resource[1]
-                gpuFrac = max(threadFrac, resFrac)
+                devFrac = max(threadFrac, resFrac)
                 envArg = {'env_vars': {'CUDA_MPS_ACTIVE_THREAD_PERCENTAGE': str(threadFrac*100)}}
-                worker = workerClass.options(num_gpus=gpuFrac, runtime_env=envArg) \
-                                    .remote(profLevel=self.profLevel,
-                                            defaultGroup=self.globalGroupID)
+                if resourceName == 'GPU':
+                    worker = workerClass.options(num_gpus=devFrac, runtime_env=envArg) \
+                                        .remote(profLevel=self.profLevel,
+                                                defaultGroup=self.globalGroupID)
+                else:
+                    worker = workerClass.options(resources={resourceName: devFrac}, runtime_env=envArg) \
+                                        .remote(profLevel=self.profLevel,
+                                                defaultGroup=self.globalGroupID)
                 self.freeWorkers[wID] = _WorkerState(worker, 0)
 
     def update(self, reqs=(), completedWorkers=()):
@@ -568,13 +573,14 @@ class StaticPolicy(Policy):
         # {groupID: BalancePolicy}
         self.groups = {}
 
-    def registerGroup(self, groupID, workerClass: PoolWorker, workerResources=1):
+    def registerGroup(self, groupID, workerClass: PoolWorker, workerResources=1, resourceName="GPU"):
         """Register a group with this policy.
         Arguments:
             groupID, workerClass: See the Policy ABC
             workerResources: List of (threadFrac, resFrac) resources used per
             client. If it is an integer, that many workers will be created with
             one full GPU worth of requirements..
+            resourceName: name of custom resource if not using GPUs
         """
         if isinstance(workerResources, int):
             workerResources = [(1.0, 1.0)]*workerResources
@@ -583,7 +589,9 @@ class StaticPolicy(Policy):
         group = StaticBalancePolicy(len(workerResources),
                                     profLevel=self.profLevel,
                                     globalGroupID=groupID)
-        group.registerGroup(groupID, workerClass, workerResources=workerResources)
+        group.registerGroup(groupID, workerClass,
+                            workerResources=workerResources,
+                            resourceName=resourceName)
         self.groups[groupID] = group
 
     def update(self, reqs=(), completedWorkers=()):
