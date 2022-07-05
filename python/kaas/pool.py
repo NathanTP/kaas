@@ -36,9 +36,7 @@ class policies(str, enum.Enum):
     BALANCE = 'balance'
     EXCLUSIVE = 'exclusive'
     STATIC = 'static'
-    # BALANCE = enum.auto()
-    # EXCLUSIVE = enum.auto()
-    # STATIC = enum.auto()
+    AFFINITY = 'affinity'
 
 
 class PoolError(Exception):
@@ -386,6 +384,229 @@ class BalancePolicy(Policy):
             return newRuns, rejectedReqs
         else:
             return newRuns
+
+    async def getProfile(self):
+        """Schema: There is only one pool so there are no per-group pool profs
+        (top-level pool profs are aggregated across all groups).
+
+        """
+        if len(self.busyWorkers) != 0:
+            raise PoolError("Cannot call getProfile() when there are pending requests")
+
+        for worker in self.freeWorkers.values():
+            self.pendingProfs.append(worker.actor._getProfile.remote())
+
+        workerStats = await asyncio.gather(*self.pendingProfs)
+        self.pendingProfs = []
+
+        workerProfs = self.profTop.mod('workers')
+        for workerStat in workerStats:
+            workerProfs.merge(workerStat)
+
+        latestProfs = self.profTop
+        self.initProfs()
+
+        return latestProfs
+
+    def shutdown(self):
+        confirmations = []
+        for worker in itertools.chain(self.freeWorkers.values(), self.busyWorkers.values()):
+            confirmations.append(worker.actor._shutdown.remote())
+
+        ray.wait(confirmations, num_returns=len(confirmations))
+
+
+class cfsGroup():
+    def __init__(self, weight: int, affinities: list[int], vTime: int):
+        self.vTime = vTime
+        self.weight = weight
+        self.reqs = collections.deque()
+        self.affinities = affinities
+
+    def increment(self):
+        self.vTime += self.weight
+        return self.vTime
+
+    def push(self, req, baseVTime):
+        """Add a request to the groups pending queue"""
+        # Idle groups get a new VTime to avoid idle workers accumulating
+        # unbounded priority
+        if len(self.reqs) == 0:
+            self.vTime = baseVTime
+        self.reqs.append(req)
+
+    def peek(self, devID):
+        """Return the weighted vTime of this group on devID. The current
+        algorithm penalizes groups by 1 weight for non-affinity GPUs, though
+        this is a tunable parameter. if devID is None, no weighting happens."""
+        if devID is None or devID in self.affinities:
+            return self.vTime
+        else:
+            return self.vTime + self.weight
+
+    def pop(self):
+        return self.reqs.popleft()
+
+
+class CfsQueue():
+    def __init__(self):
+        """Push requests and pop them in cfs order with affinity."""
+        # {gropuID: cfsGroup}
+        self.groups = {}
+        self.baseVTime = 0
+
+    def _minGroup(self, devID=None):
+        minVTime = float('inf')
+        minGroup = None
+        minGroupID = None
+        for groupID, group in self.groups.items():
+            if len(group.reqs) == 0:
+                continue
+
+            gVTime = group.peek(devID)
+            if gVTime < minVTime:
+                minVTime = gVTime
+                minGroup = group
+                minGroupID = groupID
+
+        return minGroupID, minGroup
+
+    def addGroup(self, groupID, weight: int, affinities: list[int]):
+        self.groups[groupID] = cfsGroup(weight, affinities, self.baseVTime)
+
+    def push(self, groupID, req):
+        self.groups[groupID].push(req, self.baseVTime)
+
+    def pop(self, devID):
+        minGroupID, minGroup = self._minGroup(devID)
+        if minGroupID is None:
+            return None, None
+
+        vTime = minGroup.increment()
+
+        # This isn't guaranteed to be true because of the weighting. If all
+        # weights were equal, this would always be true.
+        if vTime > self.baseVTime:
+            self.baseVTime += vTime
+
+        # Move the group to the end of the line to avoid starvation (dicts are
+        # fifo ordered).
+        # Specifically, a group that quickly switches between idle and non-idle
+        # would always run before anyone after it in the dictionary. Ties
+        # should be broken by LRU.
+        minGroup = self.groups.pop(minGroupID)
+        self.groups[minGroupID] = minGroup
+
+        return minGroupID, minGroup.pop()
+
+
+# Note: this is currently only used for the StaicPolicy, it probably isn't too
+# suitable for using directly.
+class AffinityPolicy(Policy):
+    def __init__(self, maxWorkers, profLevel=0, globalGroupID=None):
+        """Like balance but only supports a static set of workers. You can
+        register multiple groups if you want, but later groups won't have any
+        affect on the policy.
+        Arguments:
+            maxWorkers: Ignored. Here for compatibility with the Policy ABC,
+            only the resource request for the first registered group
+            matters.
+        """
+        self.profLevel = profLevel
+        self.globalGroupID = globalGroupID
+        self.initProfs()
+
+        self.nWorkers = maxWorkers
+        self.nextWID = 0
+
+        # References to profiling data from killed workers
+        self.pendingProfs = []
+
+        # {workerID: _WorkerState}
+        self.freeWorkers = {}  # ready to recieve a request
+        self.busyWorkers = {}  # currently running a request
+        self.pendingReqs = CfsQueue()
+
+    def initProfs(self):
+        self.profTop = createProfiler(self.profLevel)
+        if self.globalGroupID is None:
+            self.profs = self.profTop.mod('pool')
+        else:
+            self.profs = self.profTop.mod('pool').mod('groups').mod(self.globalGroupID)
+
+    def registerGroup(self, groupID, workerClass: PoolWorker, weight=None, affinities=None):
+        """The BalancePolicy initializes the maximum number of workers as soon
+        as the first worker type is registered and never messes with them
+        again. It does not distinguish between groupIDs because there will
+        only ever be one worker class.
+        Arguments:
+            workerResources: List of (threadFrac, resFrac) resources used per
+            client. If it is an integer, that many workers will be created with
+            one full GPU worth of requirements.
+        """
+        logging.debug(f"Registering {groupID} with weight={weight} and affinities={affinities}")
+        # Affinity requires all workers be the same. It generates all the
+        # workers on the first group registration and never touches them again.
+        if len(self.freeWorkers) == 0 and len(self.busyWorkers) == 0:
+            for i in range(self.nWorkers):
+                worker = workerClass.remote(profLevel=self.profLevel, defaultGroup=self.globalGroupID)
+                self.freeWorkers[self.nextWID] = _WorkerState(worker, 0)
+                self.nextWID += 1
+
+        assert weight is not None
+        assert affinities is not None
+        self.pendingReqs.addGroup(groupID, weight, affinities)
+
+    def update(self, reqs=(), completedWorkers=()):
+        """The balance policy will try to run requests if possible, but if
+        there are no free workers, it may queue them up pending new
+        completions.
+
+        Returns: (newRuns, rejectedReqs)
+            newRuns: {doneFuture: wID, ...}
+            rejectedReqs: [req]
+                Only returned if strict==True, otherwise only the newRuns dict
+                is returned.
+        """
+        if len(self.freeWorkers) == 0 and len(self.busyWorkers) == 0:
+            raise PoolError("No groups have been registered!")
+
+        for wID in completedWorkers:
+            doneWorker = self.busyWorkers.pop(wID)
+
+            doneWorker.nOutstanding -= 1
+            if doneWorker.nOutstanding == 0:
+                self.freeWorkers[wID] = doneWorker
+            else:
+                self.busyWorkers[wID] = doneWorker
+
+        for req in reqs:
+            self.pendingReqs.push(req.groupID, req)
+
+        # We mutate freeWorkers so we have to iterate the keys (and force the
+        # keys() iterator to fully execute by casting to list)
+        newRuns = {}
+        for wID in list(self.freeWorkers.keys()):
+            gID, req = self.pendingReqs.pop(wID)
+            if req is None:
+                # All reqs scheduled
+                break
+
+            logging.debug(f"Submitting request for group {req.groupID} to worker {wID}")
+            worker = self.freeWorkers.pop(wID)
+            resRefs = worker.actor._runWithCompletion.options(
+                num_returns=req.num_returns + 1).remote(
+                req.fName, *req.args,
+                groupID=req.groupID, **req.kwargs)
+
+            worker.nOutstanding += 1
+            self.busyWorkers[wID] = worker
+
+            req.resFuture.set_result(resRefs[1:])
+            doneFut = asyncio.wrap_future(resRefs[1].future())
+            newRuns[doneFut] = wID
+
+        return newRuns
 
     async def getProfile(self):
         """Schema: There is only one pool so there are no per-group pool profs
@@ -948,6 +1169,8 @@ class _PoolActor():
             self.policy = ExclusivePolicy(maxWorkers, profLevel=profLevel, **policyArgs)
         elif policy is policies.STATIC:
             self.policy = StaticPolicy(maxWorkers, profLevel=profLevel, **policyArgs)
+        elif policy is policies.AFFINITY:
+            self.policy = AffinityPolicy(maxWorkers, profLevel=profLevel, **policyArgs)
         else:
             raise PoolError("Unrecognized policy: " + str(policy))
 
