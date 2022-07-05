@@ -39,7 +39,7 @@ def testTaskTwo(arg):
     return arg, arg*10
 
 
-@ray.remote(num_gpus=1)
+@ray.remote(num_gpus=1, num_cpus=0)
 class TestWorker(kaas.pool.PoolWorker):
     def __init__(self, **workerKwargs):
         # must be called before accessing inherited methods like getProfs()
@@ -59,7 +59,7 @@ class TestWorker(kaas.pool.PoolWorker):
         return arg
 
 
-@ray.remote(resources={"testResource": 1})
+@ray.remote(resources={"testResource": 1}, num_cpus=0)
 class TestWorkerNoGPU(kaas.pool.PoolWorker):
     def __init__(self, **workerKwargs):
         # must be called before accessing inherited methods like getProfs()
