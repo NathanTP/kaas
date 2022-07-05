@@ -17,8 +17,12 @@ def getNGPUs():
     if "CUDA_VISIBLE_DEVICES" in os.environ:
         return len(os.environ['CUDA_VISIBLE_DEVICES'].split(','))
     else:
-        proc = sp.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
-                      stdout=sp.PIPE, text=True)
+        try:
+            proc = sp.run(['nvidia-smi', '--query-gpu=name', '--format=csv,noheader'],
+                          stdout=sp.PIPE, text=True)
+        except FileNotFoundError:
+            return None
+
         if proc.returncode != 0:
             return None
         else:
@@ -75,12 +79,21 @@ class TestWorkerNoGPU(kaas.pool.PoolWorker):
         return arg
 
 
-def testMultiRet(policy):
+def testMultiRet(policy, useGPU=False):
+    if useGPU:
+        nGPUs = getNGPUs()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nWorkers = nGPUs
+        worker = TestWorker
+    else:
+        worker = TestWorkerNoGPU
+        nWorkers = nResource
+
     success = True
-    nGPUs = getNGPUs()
     groupID = "exampleGroup"
-    pool = kaas.pool.Pool(nGPUs, policy=policy)
-    pool.registerGroup(groupID, TestWorker)
+    pool = kaas.pool.Pool(nWorkers, policy=policy)
+    pool.registerGroup(groupID, worker)
 
     refs = []
     for i in range(3):
@@ -107,12 +120,21 @@ def testMultiRet(policy):
     return success
 
 
-def testOneRet(policy, inputRef=False):
+def testOneRet(policy, inputRef=False, useGPU=False):
+    if useGPU:
+        nGPUs = getNGPUs()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nWorkers = nGPUs
+        worker = TestWorker
+    else:
+        worker = TestWorkerNoGPU
+        nWorkers = nResource
+
     success = True
     groupID = "exampleGroup"
-    nGPUs = getNGPUs()
-    pool = kaas.pool.Pool(nGPUs, policy=policy)
-    pool.registerGroup(groupID, TestWorker)
+    pool = kaas.pool.Pool(nWorkers, policy=policy)
+    pool.registerGroup(groupID, worker)
 
     refs = []
     for i in range(3):
@@ -136,13 +158,13 @@ def testOneRet(policy, inputRef=False):
     return success
 
 
-def testStress(policy, gpu=True):
+def testStress(policy, useGPU=False):
     """Submit many requests from many groups in one batch and wait for returns.
     There are more groups than workers and many requests interleaved between
     groups so this should stress the pool."""
     success = True
 
-    if gpu:
+    if useGPU:
         nGPUs = getNGPUs()
         if nGPUs is None:
             raise RuntimeError("gpu==True but there are no GPUs available")
@@ -197,7 +219,17 @@ def testStress(policy, gpu=True):
     return success
 
 
-def testProfs(policy):
+def testProfs(policy, useGPU=False):
+    if useGPU:
+        nGPUs = getNGPUs()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nWorkers = nGPUs
+        worker = TestWorker
+    else:
+        nWorkers = nResource
+        worker = TestWorkerNoGPU
+
     success = True
     pool = kaas.pool.Pool(1, policy=policy)
 
@@ -205,7 +237,7 @@ def testProfs(policy):
     # groups = ['group0']
     retRefs = []
     for groupID in groups:
-        pool.registerGroup(groupID, TestWorker)
+        pool.registerGroup(groupID, worker)
 
     for groupID in groups:
         for i in range(5):
@@ -227,20 +259,20 @@ def testProfs(policy):
     return success
 
 
-def testStatic(policy, gpu=True):
-    if gpu:
+def testStatic(policy, useGPU=False):
+    if useGPU:
         nGPUs = getNGPUs()
         if nGPUs is None:
             raise RuntimeError("gpu==True but there are no GPUs available")
-        nResource = nGPUs
-        worker = TestWorker.options(num_gpus=0.125)
+        nWorkers = nGPUs
+        worker = TestWorker
     else:
-        nResource = nResource
+        nWorkers = nResource
         worker = TestWorkerNoGPU
 
     nGroup = nResource * 8
 
-    pool = kaas.pool.Pool(nResource, policy=kaas.pool.policies.STATIC)
+    pool = kaas.pool.Pool(nWorkers, policy=kaas.pool.policies.STATIC)
 
     groups = ['g' + str(x) for x in range(nGroup)]
     for group in groups:
@@ -263,11 +295,21 @@ def simple():
     pool.shutdown()
 
 
-def testConfirm(policy):
+def testConfirm(policy, useGPU=False):
+    if useGPU:
+        nGPUs = getNGPUs()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nWorkers = nGPUs
+        worker = TestWorker
+    else:
+        nWorkers = nResource
+        worker = TestWorkerNoGPU
+
     success = True
     groupID = "exampleGroup"
     pool = kaas.pool.Pool(3, policy=policy)
-    pool.registerGroup(groupID, TestWorker)
+    pool.registerGroup(groupID, worker)
 
     refs = []
     for i in range(3):
@@ -286,11 +328,21 @@ def testConfirm(policy):
     return success
 
 
-def testConfirmMultiRet(policy):
+def testConfirmMultiRet(policy, useGPU=False):
+    if useGPU:
+        nGPUs = getNGPUs()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nWorkers = nGPUs
+        worker = TestWorker
+    else:
+        nWorkers = nResource
+        worker = TestWorkerNoGPU
+
     success = True
     groupID = "exampleGroup"
     pool = kaas.pool.Pool(3, policy=policy)
-    pool.registerGroup(groupID, TestWorker)
+    pool.registerGroup(groupID, worker)
 
     refs = []
     for i in range(3):
@@ -340,20 +392,21 @@ if __name__ == "__main__":
     else:
         tests = args.test
 
+    useGPU = False
     for test in tests:
         print(f"Running with {args.policy}: {test}")
         if test == 'oneRet':
-            ret = testOneRet(policy)
+            ret = testOneRet(policy, useGPU=useGPU)
         elif test == 'multiRet':
-            ret = testMultiRet(policy)
+            ret = testMultiRet(policy, useGPU=useGPU)
         elif test == 'profiling':
-            ret = testProfs(policy)
+            ret = testProfs(policy, useGPU=useGPU)
         elif test == 'stress':
-            ret = testStress(policy, gpu=True)
+            ret = testStress(policy, useGPU=useGPU)
         elif test == 'confirm':
-            ret = testConfirmMultiRet(policy)
+            ret = testConfirmMultiRet(policy, useGPU=useGPU)
         elif test == 'static':
-            ret = testStatic(policy, gpu=True)
+            ret = testStatic(policy, useGPU=useGPU)
         else:
             raise ValueError("Unrecognized test: ", test)
 
