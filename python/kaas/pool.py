@@ -442,7 +442,7 @@ class cfsGroup():
         if devID is None or devID in self.affinities:
             return self.vTime
         else:
-            return self.vTime + self.weight
+            return self.vTime + 2*self.weight
 
     def pop(self):
         return self.reqs.popleft()
