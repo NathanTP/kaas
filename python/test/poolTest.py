@@ -9,7 +9,7 @@ import subprocess as sp
 import kaas.pool
 
 
-nResource = 2
+nResource = 4
 
 
 def getNGPUs():
@@ -257,6 +257,42 @@ def testProfs(policy, useGPU=False):
     return success
 
 
+def testAffinity(policy, useGPU=False):
+    if useGPU:
+        nGPUs = getNGPUs()
+        if nGPUs is None:
+            raise RuntimeError("gpu==True but there are no GPUs available")
+        nWorkers = nGPUs
+        worker = TestWorker
+    else:
+        nWorkers = nResource
+        worker = TestWorkerNoGPU
+
+    nGroup = nResource * 2
+    groupNWorker = 2
+    workerShare = nResource / (nGroup*groupNWorker)
+
+    pool = kaas.pool.Pool(nWorkers, policy=kaas.pool.policies.AFFINITY)
+
+    groups = ['g' + str(x) for x in range(nGroup)]
+    affinity = 0
+    for group in groups:
+        pool.registerGroup(group, worker, weight=workerShare, affinities=[affinity])
+        affinity = (affinity + 1) % nResource
+
+    retRefs = []
+    for groupID in groups:
+        retRefs.append(pool.run(groupID, 'returnOne', args=['testInp']))
+
+    rets = ray.get(ray.get(retRefs))
+    pool.shutdown()
+    for ret in rets:
+        if ret != "testInp":
+            return False
+
+    return True
+
+
 def testFractional(policy, useGPU=False):
     if useGPU:
         nGPUs = getNGPUs()
@@ -340,11 +376,11 @@ def testConfirm(policy, useGPU=False):
 POLICY = kaas.pool.policies.EXCLUSIVE
 
 if __name__ == "__main__":
-    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm', 'fractional']
+    availableTests = ['oneRet', 'multiRet', 'profiling', 'stress', 'confirm', 'fractional', 'affinity']
 
     parser = argparse.ArgumentParser("Non-KaaS unit tests for the pool")
     parser.add_argument('-t', '--test', action='append', choices=availableTests + ['all'])
-    parser.add_argument('-p', '--policy', choices=['balance', 'exclusive', 'static'])
+    parser.add_argument('-p', '--policy', choices=['balance', 'exclusive', 'static', 'affinity'])
     parser.add_argument("--gpu", action='store_true', help="Use GPUs rather than the default custom resource")
 
     args = parser.parse_args()
@@ -357,6 +393,8 @@ if __name__ == "__main__":
         policy = kaas.pool.policies.EXCLUSIVE
     elif args.policy == 'static':
         policy = kaas.pool.policies.STATIC
+    elif args.policy == 'affinity':
+        policy = kaas.pool.policies.AFFINITY
     else:
         raise ValueError("Unrecognized Policy: ", args.policy)
 
@@ -379,6 +417,8 @@ if __name__ == "__main__":
             ret = testConfirm(policy, useGPU=args.gpu)
         elif test == 'fractional':
             ret = testFractional(policy, useGPU=args.gpu)
+        elif test == 'affinity':
+            ret = testAffinity(policy, useGPU=args.gpu)
         else:
             raise ValueError("Unrecognized test: ", test)
 
