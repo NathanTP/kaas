@@ -456,20 +456,24 @@ class CfsQueue():
         self.baseVTime = 0
 
     def _minGroup(self, devID=None):
-        minVTime = float('inf')
+        minVTimeReal = float('inf')
+        minVTimeWeighted = float('inf')
         minGroup = None
         minGroupID = None
         for groupID, group in self.groups.items():
             if len(group.reqs) == 0:
                 continue
 
+            if group.vTime < minVTimeReal:
+                minVTimeReal = group.vTime
+
             gVTime = group.peek(devID)
-            if gVTime < minVTime:
-                minVTime = gVTime
+            if gVTime < minVTimeWeighted:
+                minVTimeWeighted = gVTime
                 minGroup = group
                 minGroupID = groupID
 
-        return minGroupID, minGroup
+        return minGroupID, minGroup, minVTimeReal
 
     def addGroup(self, groupID, weight: int, affinities: list[int]):
         self.groups[groupID] = cfsGroup(weight, affinities, self.baseVTime)
@@ -478,16 +482,13 @@ class CfsQueue():
         self.groups[groupID].push(req, self.baseVTime)
 
     def pop(self, devID):
-        minGroupID, minGroup = self._minGroup(devID)
+        minGroupID, minGroup, globalMinVTime = self._minGroup(devID)
         if minGroupID is None:
             return None, None
 
-        vTime = minGroup.increment()
+        minGroup.increment()
 
-        # This isn't guaranteed to be true because of the weighting. If all
-        # weights were equal, this would always be true.
-        if vTime > self.baseVTime:
-            self.baseVTime += vTime
+        self.baseVTime = globalMinVTime
 
         # Move the group to the end of the line to avoid starvation (dicts are
         # fifo ordered).
