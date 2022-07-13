@@ -416,8 +416,21 @@ class BalancePolicy(Policy):
         ray.wait(confirmations, num_returns=len(confirmations))
 
 
+# How much to penalize CFS groups when they are not on their preferred GPU(s).
+# This is as a fraction of their estimated runtime. The exact value of this is
+# a tunable parameter. Too low and you'll get lots of groups breaking affinity,
+# but imballance in runtimes will be minimized. Too high and you might lose
+# some fairness if your system isn't well balanced (if you didn't or couldn't
+# get the affinities set just right). In practice, higher seems better. This is
+# likely because the KaaS GPU data cache is not very good and evictions seem to
+# cause serious issues. Also, most experiments so far are very well balanced so
+# it's rare for a group to lag behind.
+CFS_AFFINITY_PENALTY = 10
+
+
 class cfsGroup():
     def __init__(self, weight: int, affinities: list[int], vTime: int):
+        """Single group's metadata for the CFSAffinity policy"""
         self.vTime = vTime
         self.weight = weight
         self.reqs = collections.deque()
@@ -442,7 +455,7 @@ class cfsGroup():
         if devID is None or devID in self.affinities:
             return self.vTime
         else:
-            return self.vTime + 10*self.weight
+            return self.vTime + CFS_AFFINITY_PENALTY*self.weight
 
     def pop(self):
         return self.reqs.popleft()
@@ -501,18 +514,17 @@ class CfsQueue():
         return minGroupID, minGroup.pop()
 
 
-# Note: this is currently only used for the StaicPolicy, it probably isn't too
-# suitable for using directly.
 class AffinityPolicy(Policy):
     def __init__(self, maxWorkers, profLevel=0, globalGroupID=None):
-        """Like balance but only supports a static set of workers. You can
-        register multiple groups if you want, but later groups won't have any
-        affect on the policy.
-        Arguments:
-            maxWorkers: Ignored. Here for compatibility with the Policy ABC,
-            only the resource request for the first registered group
-            matters.
-        """
+        """Similar to the BalancePolicy but rather than FCFS, this policy uses
+        a version of Linux's 'completely fair scheduler' (CFS) algorithm with
+        added GPU affinity. CFS tracks the total runtime each group has
+        recieved so far and attempts to keep every group at a similar total
+        runtime. In vanilla CFS, the group with the lowest accumulated runtime
+        is always run. This policy adds affinity between groups and GPUs. When
+        a GPU becomes free, we weight every group's runtime by their affinity
+        to that GPU and pick the lowest weighted runtime. See the CfsGroup
+        class for weighting details."""
         self.profLevel = profLevel
         self.globalGroupID = globalGroupID
         self.initProfs()
@@ -536,14 +548,22 @@ class AffinityPolicy(Policy):
             self.profs = self.profTop.mod('pool').mod('groups').mod(self.globalGroupID)
 
     def registerGroup(self, groupID, workerClass: PoolWorker, weight=None, affinities=None):
-        """The BalancePolicy initializes the maximum number of workers as soon
-        as the first worker type is registered and never messes with them
-        again. It does not distinguish between groupIDs because there will
-        only ever be one worker class.
+        """Like BalancePolicy, multiple groups can be registered, but they must
+        all use the same workerClass (since workers are created once and never
+        shutdown).
+
         Arguments:
-            workerResources: List of (threadFrac, resFrac) resources used per
-            client. If it is an integer, that many workers will be created with
-            one full GPU worth of requirements.
+            weight: The base weight of this group. Each time a group runs, it
+                accumulates one 'weight' into its total runtime. Typically, this is
+                the expected runtime of a single request, though you are free to
+                mess with it if you'd like. For example, setting all weights to 1
+                keeps groups fair per-request while setting it to expected runtime
+                keeps groups fair by GPU-second. You could also use it for
+                priorities (e.g. set one group's weight to expectedRuntime*2 to
+                give it half the runtime).
+            affinities: A list of workers that this group has affinity for. It
+                will be much more likely to run on these workers. Workers are
+                numbered 0-(maxWorkers - 1).
         """
         logging.debug(f"Registering {groupID} with weight={weight} and affinities={affinities}")
         # Affinity requires all workers be the same. It generates all the
@@ -559,16 +579,6 @@ class AffinityPolicy(Policy):
         self.pendingReqs.addGroup(groupID, weight, affinities)
 
     def update(self, reqs=(), completedWorkers=()):
-        """The balance policy will try to run requests if possible, but if
-        there are no free workers, it may queue them up pending new
-        completions.
-
-        Returns: (newRuns, rejectedReqs)
-            newRuns: {doneFuture: wID, ...}
-            rejectedReqs: [req]
-                Only returned if strict==True, otherwise only the newRuns dict
-                is returned.
-        """
         if len(self.freeWorkers) == 0 and len(self.busyWorkers) == 0:
             raise PoolError("No groups have been registered!")
 
@@ -611,9 +621,7 @@ class AffinityPolicy(Policy):
 
     async def getProfile(self):
         """Schema: There is only one pool so there are no per-group pool profs
-        (top-level pool profs are aggregated across all groups).
-
-        """
+        (top-level pool profs are aggregated across all groups)."""
         if len(self.busyWorkers) != 0:
             raise PoolError("Cannot call getProfile() when there are pending requests")
 
@@ -672,14 +680,16 @@ class StaticBalancePolicy(Policy):
             self.profs = self.profTop.mod('pool').mod('groups').mod(self.globalGroupID)
 
     def registerGroup(self, groupID, workerClass: PoolWorker, workerResources=1, resourceName='GPU'):
-        """The BalancePolicy initializes the maximum number of workers as soon
+        """This policy initializes the maximum number of workers as soon
         as the first worker type is registered and never messes with them
         again. It does not distinguish between groupIDs because there will
         only ever be one worker class.
         Arguments:
             workerResources: List of (threadFrac, resFrac) resources used per
-            client. If it is an integer, that many workers will be created with
-            one full GPU worth of requirements.
+                client. If it is an integer, that many workers will be created
+                with one full GPU worth of requirements.
+            resourceName: You can specify a custom Ray resource to use for
+                workers if you wish.
         """
         if len(self.freeWorkers) == 0 and len(self.busyWorkers) == 0:
             if isinstance(workerResources, int):
@@ -701,16 +711,6 @@ class StaticBalancePolicy(Policy):
                 self.freeWorkers[wID] = _WorkerState(worker, 0)
 
     def update(self, reqs=(), completedWorkers=()):
-        """The balance policy will try to run requests if possible, but if
-        there are no free workers, it may queue them up pending new
-        completions.
-
-        Returns: (newRuns, rejectedReqs)
-            newRuns: {doneFuture: wID, ...}
-            rejectedReqs: [req]
-                Only returned if strict==True, otherwise only the newRuns dict
-                is returned.
-        """
         if len(self.freeWorkers) == 0 and len(self.busyWorkers) == 0:
             raise PoolError("No groups have been registered!")
 
@@ -783,7 +783,7 @@ class StaticPolicy(Policy):
     def __init__(self, maxWorkers, profLevel=0):
         """The static policy assigns workers to groups in a first-come-first
         served basis and returns an error when maxWorkers is exceeded. This
-        policy cannot not re-balance clients or create/destroy workers after
+        policy cannot re-balance clients or create/destroy workers after
         initial creation. It supports non-integer resource requirements for
         workers (must be <= 1)."""
         self.maxResource = maxWorkers
@@ -801,7 +801,7 @@ class StaticPolicy(Policy):
             groupID, workerClass: See the Policy ABC
             workerResources: List of (threadFrac, resFrac) resources used per
             client. If it is an integer, that many workers will be created with
-            one full GPU worth of requirements..
+            one full resourceName worth of requirements..
             resourceName: name of custom resource if not using GPUs
         """
         if isinstance(workerResources, int):
@@ -870,6 +870,13 @@ class StaticPolicy(Policy):
 
 class ExclusivePolicy(Policy):
     def __init__(self, maxWorkers, profLevel=0):
+        """The exclusive policy maintains a pool of workers per-group and
+        ensures that requests from different groups run on the same worker. If
+        the number of groups exceeds maxWorkers, the policy will begin killing
+        and restarting workers to ensure that every group makes progress. It is
+        work-conserving (some groups might get more workers if nGroup doesn't
+        divide evenly into maxWorkers). If nGroup >> maxWorkers, the policy
+        will thrash and nearly every request will result in a cold start."""
         self.maxWorkers = maxWorkers
         self.numWorkers = 0
 
