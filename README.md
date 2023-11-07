@@ -1,3 +1,16 @@
+This repository, along with
+[kaasBenchmarks](https://github.com/NathanTP/kaasBenchmarks), contains the code
+used to generate results in the following publications. However, no attempt has
+been made to make the code easily used by others.
+
+Nathan Pemberton. "The Serverless Datacenter: Hardware and Software Techniques
+for Resource Disaggregation". 2022. University of Californiaat Berkeley, PhD
+Dissertation. [Link](https://www2.eecs.berkeley.edu/Pubs/TechRpts/2022/EECS-2022-86.html).
+
+Nathan Pemberton, Anton Zabreyko, Zhoujie Ding, Randy Katz, and Joseph
+Gonzalez. 2022. Kernel-as-a-Service: A Serverless Interface to GPUs.
+[arXiv:2212.08146](https://arxiv.org/abs/2212.08146).
+
 # Overview
 Kernel-as-a-Service is a serverless function type that is tailored specifically
 for GPUs. Rather than running arbitrary host code as is done in most serverless
